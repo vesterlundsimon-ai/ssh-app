@@ -27,3 +27,13 @@ nsis:
   shortcutName: Shellport
   uninstallDisplayName: Shellport
   deleteAppDataOnUninstall: false
+# Electron fuses: switch off Node.js debugging/injection features the app never uses,
+# and make Windows refuse to run a tampered app.asar.
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false

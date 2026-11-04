@@ -5,6 +5,33 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { registerTerminal, unregisterTerminal } from '../lib/terminals'
 
+/** Only real web links may be opened from the terminal. */
+function openLink(uri: string): void {
+  try {
+    const u = new URL(uri)
+    if (u.protocol === 'http:' || u.protocol === 'https:') window.open(u.href)
+  } catch {
+    /* not a URL */
+  }
+}
+
+/**
+ * Pasting several lines runs each one as a command (and with multi-exec, on every host).
+ * Ask first, like Windows Terminal does. Bracketed paste is still used when the shell supports it.
+ */
+function confirmPaste(text: string): boolean {
+  const lines = text.replace(/\r?\n$/, '').split(/\r?\n|\r/)
+  if (lines.length < 2) return true
+  const preview = lines.slice(0, 6).join('\n') + (lines.length > 6 ? `\n… (${lines.length - 6} more)` : '')
+  return window.confirm(`Paste ${lines.length} lines? Each line may run as a command.\n\n${preview}`)
+}
+
+function pasteInto(term: Terminal): void {
+  void navigator.clipboard.readText().then((t) => {
+    if (t && confirmPaste(t)) term.paste(t)
+  })
+}
+
 interface Props {
   id: string
   active: boolean
@@ -55,11 +82,19 @@ export function TerminalView({ id, active, onReady, onInput, onResize }: Props):
       scrollback: 10000,
       allowProposedApi: true,
       rightClickSelectsWord: false,
-      theme: THEME
+      theme: THEME,
+      // Hidden hyperlinks (OSC 8) can show one text and point elsewhere: show the real
+      // target and ask before opening, and only allow http(s).
+      linkHandler: {
+        allowNonHttpProtocols: false,
+        activate: (_e, uri) => {
+          if (window.confirm(`Open this link in your browser?\n\n${uri}`)) openLink(uri)
+        }
+      }
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.loadAddon(new WebLinksAddon((_e, uri) => window.open(uri)))
+    term.loadAddon(new WebLinksAddon((_e, uri) => openLink(uri)))
     term.open(hostRef.current!)
     termRef.current = term
     fitRef.current = fit
@@ -83,7 +118,7 @@ export function TerminalView({ id, active, onReady, onInput, onResize }: Props):
         return false
       }
       if (e.ctrlKey && e.shiftKey && e.code === 'KeyV') {
-        void navigator.clipboard.readText().then((t) => t && term.paste(t))
+        pasteInto(term)
         return false
       }
       if (e.ctrlKey && (e.code === 'Tab' || (e.shiftKey && e.code === 'KeyW'))) return false
@@ -94,7 +129,7 @@ export function TerminalView({ id, active, onReady, onInput, onResize }: Props):
     const el = hostRef.current!
     const onContext = (e: MouseEvent): void => {
       e.preventDefault()
-      void navigator.clipboard.readText().then((t) => t && term.paste(t))
+      pasteInto(term)
     }
     el.addEventListener('contextmenu', onContext)
 

@@ -12,6 +12,8 @@ A tabbed SSH and SFTP client for Windows, in the spirit of MobaXterm.
 - **Multi-exec**: type once, run on every ticked tab. Broadcasting tabs and the banner turn orange so you always know.
 - Copy on select, right-click paste, Ctrl+Shift+C/V, clickable links, Enter to reconnect a dropped tab.
 
+Security design, controls and known limitations are in [SECURITY.md](SECURITY.md).
+
 ## Install
 
 Download `Shellport-Setup-x.y.z.exe` from the [Releases page](../../releases) (or from the latest **Build** run under Actions → Artifacts) and run it.
@@ -33,7 +35,9 @@ npm run dist:win     # build the installer into dist/ (on Windows)
 
 ### Tests
 
-`scripts/backend-test.ts` runs the real SSH and SFTP code against an SSH server (auth flows, host key rejection, uploads, downloads, rename, recursive delete). CI starts a throwaway OpenSSH server and runs it on every push. To run it yourself:
+`npm run test:unit` checks the security helpers (file name sanitising, input validation, algorithm policy).
+
+`scripts/backend-test.ts` runs the real SSH and SFTP code against an SSH server (auth flows, host key rejection, uploads, downloads, hostile file names, rename, recursive delete). CI starts a throwaway OpenSSH server and runs it on every push. To run it yourself:
 
 ```sh
 TEST_HOST=... TEST_PORT=22 TEST_USER=... TEST_PASSWORD=... \

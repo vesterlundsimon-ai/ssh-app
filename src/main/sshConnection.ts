@@ -3,6 +3,7 @@
 // This file deliberately has no Electron imports: everything UI-related goes
 // through the `hooks` object, so the connection logic can be tested in plain Node.
 
+import ssh2Constants from 'ssh2/lib/protocol/constants.js'
 import ssh2, { type AnyAuthMethod, type AuthenticationType, type ClientChannel, type ConnectConfig, type SFTPWrapper } from 'ssh2'
 import { promises as fs, existsSync } from 'fs'
 import * as os from 'os'
@@ -21,6 +22,10 @@ export interface ConnectionOptions {
   secret?: string
   /** Can the "remember" answer be saved? (only for saved sessions) */
   canRemember: boolean
+  /** Also offer SHA-1 / CBC / ssh-rsa algorithms, for old switches and appliances. */
+  legacyAlgorithms?: boolean
+  /** Host key types already trusted for this host; they are preferred so a MITM can't downgrade to another type. */
+  knownHostKeyTypes?: string[]
 }
 
 export interface PromptAnswer {
@@ -42,6 +47,80 @@ export interface ConnectionHooks {
 }
 
 const MAX_ATTEMPTS = 3
+
+/**
+ * Algorithm policy: modern defaults in line with current OpenSSH, without SHA-1,
+ * CBC ciphers or the SHA-1 based "ssh-rsa" host key signature. Strict key exchange
+ * (Terrapin / CVE-2023-48795 mitigation) is negotiated automatically by ssh2.
+ */
+export const MODERN_ALGORITHMS = {
+  kex: [
+    'curve25519-sha256',
+    'curve25519-sha256@libssh.org',
+    'ecdh-sha2-nistp256',
+    'ecdh-sha2-nistp384',
+    'ecdh-sha2-nistp521',
+    'diffie-hellman-group-exchange-sha256',
+    'diffie-hellman-group16-sha512',
+    'diffie-hellman-group18-sha512',
+    'diffie-hellman-group14-sha256'
+  ],
+  serverHostKey: [
+    'ssh-ed25519',
+    'ecdsa-sha2-nistp256',
+    'ecdsa-sha2-nistp384',
+    'ecdsa-sha2-nistp521',
+    'rsa-sha2-512',
+    'rsa-sha2-256'
+  ],
+  cipher: [
+    'chacha20-poly1305@openssh.com',
+    'aes256-gcm@openssh.com',
+    'aes128-gcm@openssh.com',
+    'aes256-ctr',
+    'aes192-ctr',
+    'aes128-ctr'
+  ],
+  hmac: ['hmac-sha2-512-etm@openssh.com', 'hmac-sha2-256-etm@openssh.com', 'hmac-sha2-512', 'hmac-sha2-256'],
+  compress: ['none', 'zlib@openssh.com']
+}
+
+/** Added after the modern ones when a session opts in to legacy algorithms. */
+const LEGACY_EXTRA = {
+  kex: ['diffie-hellman-group14-sha1', 'diffie-hellman-group-exchange-sha1', 'diffie-hellman-group1-sha1'],
+  serverHostKey: ['ssh-rsa', 'ssh-dss'],
+  cipher: ['aes256-cbc', 'aes192-cbc', 'aes128-cbc', '3des-cbc'],
+  hmac: ['hmac-sha1-etm@openssh.com', 'hmac-sha1'],
+  compress: [] as string[]
+}
+
+/** Host key signature algorithms that can be used with a given key type. */
+function algsForKeyType(type: string): string[] {
+  return type === 'ssh-rsa' ? ['rsa-sha2-512', 'rsa-sha2-256', 'ssh-rsa'] : [type]
+}
+
+export function algorithmsFor(legacy: boolean, knownKeyTypes: string[] = []): typeof MODERN_ALGORITHMS {
+  const out = {} as typeof MODERN_ALGORITHMS
+  for (const k of Object.keys(MODERN_ALGORITHMS) as (keyof typeof MODERN_ALGORITHMS)[]) {
+    out[k] = legacy ? [...MODERN_ALGORITHMS[k], ...LEGACY_EXTRA[k]] : [...MODERN_ALGORITHMS[k]]
+  }
+  // Drop anything this runtime can't do (Electron's BoringSSL has no ChaCha20-Poly1305,
+  // for example); offering an unsupported algorithm makes ssh2 refuse to connect.
+  const supported: Record<keyof typeof MODERN_ALGORITHMS, string[]> = {
+    kex: ssh2Constants.SUPPORTED_KEX,
+    serverHostKey: ssh2Constants.SUPPORTED_SERVER_HOST_KEY,
+    cipher: ssh2Constants.SUPPORTED_CIPHER,
+    hmac: ssh2Constants.SUPPORTED_MAC,
+    compress: ssh2Constants.SUPPORTED_COMPRESSION
+  }
+  for (const k of Object.keys(out) as (keyof typeof MODERN_ALGORITHMS)[]) {
+    out[k] = out[k].filter((a) => supported[k].includes(a))
+  }
+  // Like OpenSSH: ask first for the key types we already know for this host.
+  const preferred = knownKeyTypes.flatMap(algsForKeyType).filter((a) => out.serverHostKey.includes(a))
+  out.serverHostKey = [...new Set([...preferred, ...out.serverHostKey])]
+  return out
+}
 
 export function expandHome(p: string): string {
   if (p === '~') return os.homedir()
@@ -77,6 +156,9 @@ export function friendlyError(err: unknown): string {
   const msg = e?.message ?? String(err)
   if (/All configured authentication methods failed/i.test(msg)) return 'Authentication failed.'
   if (/Timed out while waiting for handshake/i.test(msg)) return 'Timed out waiting for the server to respond.'
+  if (/no matching|handshake failed/i.test(msg)) {
+    return `${msg}. The server only supports old, weaker algorithms. If you trust it (e.g. an old switch), turn on "Allow legacy algorithms" in the session settings.`
+  }
   return msg
 }
 
@@ -126,6 +208,7 @@ export class SshConnection {
       port: this.opts.port,
       username: this.opts.username,
       readyTimeout: 30_000,
+      algorithms: algorithmsFor(!!this.opts.legacyAlgorithms, this.opts.knownHostKeyTypes) as ConnectConfig['algorithms'],
       keepaliveInterval: 15_000,
       keepaliveCountMax: 4,
       tryKeyboard: true,
@@ -298,8 +381,9 @@ export class SshConnection {
       return pw === null ? [] : [pw]
     }
     const res = await this.hooks.prompt({
-      title: `${this.opts.username}@${this.opts.host}`,
-      message: instructions || undefined,
+      title: `${this.opts.username}@${this.opts.host} asks`,
+      // The text comes from the server: label it so it can't pose as Shellport itself.
+      message: `Message from the server:\n${instructions || '(none)'}`,
       fields: prompts.map((p) => ({ label: p.prompt.trim(), secret: !p.echo }))
     })
     return res.answers ?? []

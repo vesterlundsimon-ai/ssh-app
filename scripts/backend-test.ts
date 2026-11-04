@@ -119,6 +119,25 @@ async function main(): Promise<void> {
     check('download folder matches', dlBig.equals(big) && dlTxt === 'hello from shellport\n')
     check('download never overwrites', path.basename(again) === 'renamed.bin' && path.basename(again2) === 'renamed (1).bin', `${again} ${again2}`)
 
+    // Hostile file names: a Windows path-traversal name, a reserved device name, a link loop.
+    const hostile = `${remoteDir}/hostile`
+    await sftpOps.mkdir(sftp, hostile)
+    for (const name of ['..\\..\\escaped.txt', 'con', 'ok.txt']) {
+      await new Promise<void>((res, rej) =>
+        sftp.writeFile(`${hostile}/${name}`, 'x', (err) => (err ? rej(err) : res()))
+      )
+    }
+    await new Promise<void>((res, rej) => sftp.symlink(hostile, `${hostile}/loop`, (err) => (err ? rej(err) : res())))
+    const safeDir = path.join(local, 'safe')
+    const hostileOut = await sftpOps.download(sftp, hostile, safeDir, () => undefined)
+    const names = (await fs.readdir(hostileOut)).sort()
+    const escaped = await fs.readdir(local)
+    check(
+      'download sanitises hostile names and skips link loops',
+      names.join(',') === '.._.._escaped.txt,_con,ok.txt' && !escaped.includes('escaped.txt'),
+      names.join(',')
+    )
+
     await sftpOps.remove(sftp, remoteDir)
     const after = await sftpOps.list(sftp, home)
     check('recursive delete', !after.some((e) => e.path === remoteDir))

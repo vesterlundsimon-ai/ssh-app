@@ -175,6 +175,11 @@ export function SessionEditor({ session, isNew, folders, encryptionAvailable, on
           <input value={s.sftpStartDir ?? ''} placeholder="Home folder" spellCheck={false} onChange={(e) => set('sftpStartDir', e.target.value || undefined)} />
         </label>
 
+        <label className="check small">
+          <input type="checkbox" checked={!!s.legacyAlgorithms} onChange={(e) => set('legacyAlgorithms', e.target.checked || undefined)} />
+          Allow legacy algorithms (SHA-1, CBC, ssh-rsa). Only for old devices that need them.
+        </label>
+
         <label className="field">
           <span>Notes</span>
           <textarea rows={2} value={s.notes ?? ''} onChange={(e) => set('notes', e.target.value || undefined)} />

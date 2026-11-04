@@ -31,7 +31,8 @@ export async function list(sftp: SFTPWrapper, dir: string): Promise<RemoteEntry[
   const items = await p<{ filename: string; attrs: Stats }[]>((cb) => sftp.readdir(dir, cb))
   const entries = await Promise.all(
     items
-      .filter((it) => it.filename !== '.' && it.filename !== '..')
+      // Drop "." / ".." and anything containing a separator: never valid from a well-behaved server.
+      .filter((it) => isSafeRemoteName(it.filename))
       .map(async (it): Promise<RemoteEntry> => {
         const full = posix.join(dir, it.filename)
         const mode = it.attrs.mode ?? 0
@@ -127,21 +128,30 @@ function throttled(fn: ProgressFn): ProgressFn & { flush: () => void } {
   return t
 }
 
-/** Upload a local file or folder into remoteDir. */
+/** Recursion limits so a symlink loop or a hostile server can't make a transfer run forever. */
+export const MAX_DEPTH = 64
+export const MAX_FILES = 200_000
+
+/** Upload a local file or folder into remoteDir. Symlinks / junctions inside folders are skipped. */
 export async function upload(sftp: SFTPWrapper, localPath: string, remoteDir: string, onProgress: ProgressFn): Promise<void> {
   const jobs: FileJob[] = []
   const dirs: string[] = []
 
-  async function walk(local: string, remote: string): Promise<void> {
-    const st = await fs.stat(local)
+  async function walk(local: string, remote: string, depth: number): Promise<void> {
+    if (depth > MAX_DEPTH) throw new Error(`Folder nesting is deeper than ${MAX_DEPTH} levels: ${local}`)
+    if (jobs.length + dirs.length > MAX_FILES) throw new Error(`More than ${MAX_FILES} files; upload a smaller folder.`)
+    // The item the user picked may be a link; anything found inside a folder is not followed.
+    const st = depth === 0 ? await fs.stat(local) : await fs.lstat(local)
     if (st.isDirectory()) {
       dirs.push(remote)
-      for (const name of await fs.readdir(local)) await walk(path.join(local, name), posix.join(remote, name))
+      for (const name of await fs.readdir(local)) await walk(path.join(local, name), posix.join(remote, name), depth + 1)
     } else if (st.isFile()) {
       jobs.push({ from: local, to: remote, size: st.size })
     }
   }
-  await walk(localPath, posix.join(remoteDir, path.basename(localPath)))
+  const name = path.basename(localPath)
+  if (!isSafeRemoteName(name)) throw new Error(`Can't upload an item named “${name}”.`)
+  await walk(localPath, posix.join(remoteDir, name), 0)
 
   for (const d of dirs) {
     const st = await remoteExists(sftp, d)
@@ -153,29 +163,75 @@ export async function upload(sftp: SFTPWrapper, localPath: string, remoteDir: st
   )
 }
 
-/** Download a remote file or folder into localDir. Never overwrites: picks "name (1).ext" instead. */
+/**
+ * Download a remote file or folder into localDir. Never overwrites: picks "name (1).ext" instead.
+ *
+ * File names come from the server, so they are untrusted: a malicious server could send
+ * names like "..\\..\\Startup\\evil.exe". Every name is made safe for Windows and every
+ * destination is checked to be inside the folder the user chose.
+ */
 export async function download(sftp: SFTPWrapper, remotePath: string, localDir: string, onProgress: ProgressFn): Promise<string> {
   const jobs: FileJob[] = []
   const dirs: string[] = []
+  const root = path.resolve(localDir)
 
-  async function walk(remote: string, local: string): Promise<void> {
+  async function walk(remote: string, local: string, depth: number): Promise<void> {
+    if (depth > MAX_DEPTH) throw new Error(`Folder nesting is deeper than ${MAX_DEPTH} levels: ${remote}`)
+    if (jobs.length + dirs.length > MAX_FILES) throw new Error(`More than ${MAX_FILES} files; download a smaller folder.`)
+    assertInside(root, local)
     const st = await p<Stats>((cb) => sftp.stat(remote, cb))
     if (st.isDirectory()) {
       dirs.push(local)
-      for (const e of await list(sftp, remote)) await walk(e.path, path.join(local, e.name))
-    } else {
+      for (const e of await list(sftp, remote)) {
+        if (e.isLink && e.isDir) continue // don't follow linked folders (loops, surprise size)
+        await walk(e.path, path.join(local, safeLocalName(e.name)), depth + 1)
+      }
+    } else if (st.isFile()) {
       jobs.push({ from: remote, to: local, size: st.size ?? 0 })
     }
   }
-  await fs.mkdir(localDir, { recursive: true })
-  const target = await uniqueLocalPath(path.join(localDir, posix.basename(remotePath)))
-  await walk(remotePath, target)
+  await fs.mkdir(root, { recursive: true })
+  const target = await uniqueLocalPath(path.join(root, safeLocalName(posix.basename(remotePath))))
+  await walk(remotePath, target, 0)
 
   for (const d of dirs) await fs.mkdir(d, { recursive: true })
   await runJobs(jobs, onProgress, (job, step) =>
     p<void>((cb) => sftp.fastGet(job.from, job.to, { step }, (err) => cb(err, undefined)))
   )
   return target
+}
+
+// ---- name safety --------------------------------------------------------------
+
+/** A single path component that is valid on the server: no separators, no "." / "..". */
+export function isSafeRemoteName(name: string): boolean {
+  return name.length > 0 && name.length <= 255 && name !== '.' && name !== '..' && !/[/\0]/.test(name)
+}
+
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i
+
+/** Turn a server-supplied name into one safe file name on Windows (and everywhere else). */
+export function safeLocalName(name: string): string {
+  let out = name
+    // eslint-disable-next-line no-control-regex
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    .replace(/[. ]+$/, '') // Windows strips trailing dots and spaces
+  if (out === '' || out === '.' || out === '..' || /^\.+$/.test(out)) out = '_'
+  if (WINDOWS_RESERVED.test(out)) out = '_' + out
+  if (out.length > 200) {
+    const ext = path.extname(out).slice(0, 20)
+    out = out.slice(0, 200 - ext.length) + ext
+  }
+  return out
+}
+
+/** Throw unless `child` resolves to somewhere inside `root`. */
+export function assertInside(root: string, child: string): void {
+  const r = path.resolve(root)
+  const c = path.resolve(child)
+  const rel = path.relative(r, c)
+  if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) return
+  throw new Error(`Refusing to write outside the download folder: ${child}`)
 }
 
 async function uniqueLocalPath(target: string): Promise<string> {

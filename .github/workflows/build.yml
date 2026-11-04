@@ -7,20 +7,33 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Least privilege: read-only by default; only the release step gets write access.
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    name: Typecheck and SSH/SFTP tests
+    name: Typecheck, audit and SSH/SFTP tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Third-party actions are pinned to full commit SHAs so a moved tag can't change what runs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts
+      - name: Verify package signatures
+        run: npm audit signatures
+      - name: Audit shipped dependencies
+        run: npm audit --omit=dev --audit-level=moderate
       - run: npm run typecheck
       - name: Start a throwaway SSH server
         run: |
@@ -35,6 +48,7 @@ jobs:
           sudo chown -R tester:tester /home/tester/.ssh && sudo chmod 700 /home/tester/.ssh
           printf 'Port 2222\nListenAddress 127.0.0.1\nHostKey /etc/ssh/ssh_host_ed25519_key\nPasswordAuthentication yes\nUsePAM yes\nSubsystem sftp internal-sftp\nPidFile /tmp/sshd-ci.pid\n' > "$RUNNER_TEMP/sshd_config"
           sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config"
+      - run: npm run test:unit
       - run: npm run test:backend
         env:
           TEST_HOST: 127.0.0.1
@@ -49,9 +63,12 @@ jobs:
     name: Windows installer
     needs: test
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -59,14 +76,32 @@ jobs:
       - run: npm run dist:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - uses: actions/upload-artifact@v4
+      - name: Record installer checksum
+        shell: pwsh
+        run: Get-ChildItem dist/*.exe | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } | Out-File -Encoding ascii dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Shellport-installer
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/SHA256SUMS.txt
           if-no-files-found: error
-      - name: Attach installer to the GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: installer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          files: dist/*.exe
+          name: Shellport-installer
+          path: dist
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: |
+            dist/*.exe
+            dist/SHA256SUMS.txt
           generate_release_notes: true

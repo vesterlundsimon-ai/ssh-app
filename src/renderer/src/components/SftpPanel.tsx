@@ -144,7 +144,7 @@ export function SftpPanel({ connId, connected, tabTitle, startDir, transfers, on
   const download = (items: RemoteEntry[]): Promise<void> => run(() => window.api.sftp.download(connId, items.map((e) => e.path)))
 
   const downloadTo = async (items: RemoteEntry[]): Promise<void> => {
-    const [dir] = await window.api.sftp.chooseLocal('folder')
+    const [dir] = await window.api.sftp.chooseLocal('downloadDir')
     if (dir) await run(() => window.api.sftp.download(connId, items.map((e) => e.path), dir))
   }
 

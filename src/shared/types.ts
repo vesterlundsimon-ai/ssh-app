@@ -24,6 +24,8 @@ export interface Session {
   notes?: string
   /** Directory the SFTP browser opens in. Defaults to the remote home dir. */
   sftpStartDir?: string
+  /** Also allow SHA-1 / CBC / ssh-rsa algorithms (for old switches and appliances). */
+  legacyAlgorithms?: boolean
   /** Set by the main process: is a password / passphrase stored for this session? */
   hasSecret?: boolean
 }

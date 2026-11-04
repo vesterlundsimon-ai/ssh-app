@@ -60,7 +60,7 @@ const api = {
       ipcRenderer.invoke('sftp:upload', connId, localPaths, remoteDir),
     download: (connId: string, remotePaths: string[], localDir?: string): Promise<string[]> =>
       ipcRenderer.invoke('sftp:download', connId, remotePaths, localDir),
-    chooseLocal: (mode: 'files' | 'folder'): Promise<string[]> => ipcRenderer.invoke('sftp:chooseLocal', mode),
+    chooseLocal: (mode: 'files' | 'folder' | 'downloadDir'): Promise<string[]> => ipcRenderer.invoke('sftp:chooseLocal', mode),
     onTransfer: (fn: (p: TransferProgress) => void) => on('sftp:transfer', fn),
     onDownloaded: (fn: (transferId: string, localPath: string) => void) => on('sftp:downloaded', fn)
   },

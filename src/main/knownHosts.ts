@@ -54,6 +54,11 @@ function hostId(host: string, port: number): string {
   return port === 22 ? host.toLowerCase() : `[${host.toLowerCase()}]:${port}`
 }
 
+/** Key types already trusted for a host (used to order host key algorithms). */
+export async function knownKeyTypes(host: string, port: number): Promise<string[]> {
+  return ((await load())[hostId(host, port)] ?? []).map((k) => k.type)
+}
+
 /**
  * Returns true if the connection may proceed.
  * `win` is used as the parent for the confirmation dialog.
@@ -94,6 +99,24 @@ export async function verifyHostKey(
     })
     if (res.response !== 1) return false
     db[id] = known.filter((k) => k.type !== type)
+  } else if (known.length > 0) {
+    // We know this host, but it presented a key of a type we've never seen for it.
+    // That's what a downgrade / MITM attempt looks like, so don't treat it as a first visit.
+    const res = await opts({
+      type: 'warning',
+      title: 'Different host key type',
+      message: `${id} presented a different kind of host key than before.`,
+      detail:
+        `Trusted before:\n${known.map((k) => `  ${k.type}  ${k.fingerprint}`).join('\n')}\n\n` +
+        `Presented now:\n  ${type}  ${fp}\n\n` +
+        `This can happen after a server upgrade, but it can also mean someone is intercepting the connection. ` +
+        `Only continue if you can confirm the new fingerprint with the server's administrator.`,
+      buttons: ['Disconnect', 'Trust the new key and connect'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    })
+    if (res.response !== 1) return false
   } else {
     const res = await opts({
       type: 'question',
