@@ -1,0 +1,29 @@
+appId: com.shellport.app
+productName: Shellport
+copyright: Copyright © 2026 Simon Vesterlund
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+  - "!**/*.map"
+# ssh2's native speed-ups are optional; the pure-JS fallback is used instead,
+# so no C++ toolchain is needed to build the installer.
+npmRebuild: false
+asar: true
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: Shellport-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Shellport
+  uninstallDisplayName: Shellport
+  deleteAppDataOnUninstall: false

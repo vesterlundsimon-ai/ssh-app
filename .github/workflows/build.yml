@@ -1,0 +1,72 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Typecheck and SSH/SFTP tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - name: Start a throwaway SSH server
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq openssh-server
+          sudo useradd -m -s /bin/bash tester
+          echo 'tester:ci-password' | sudo chpasswd
+          mkdir -p "$RUNNER_TEMP/keys"
+          ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/keys/id_plain"
+          ssh-keygen -q -t ed25519 -N 'ci-pass' -f "$RUNNER_TEMP/keys/id_enc"
+          sudo mkdir -p /home/tester/.ssh /run/sshd
+          cat "$RUNNER_TEMP"/keys/*.pub | sudo tee /home/tester/.ssh/authorized_keys > /dev/null
+          sudo chown -R tester:tester /home/tester/.ssh && sudo chmod 700 /home/tester/.ssh
+          printf 'Port 2222\nListenAddress 127.0.0.1\nHostKey /etc/ssh/ssh_host_ed25519_key\nPasswordAuthentication yes\nUsePAM yes\nSubsystem sftp internal-sftp\nPidFile /tmp/sshd-ci.pid\n' > "$RUNNER_TEMP/sshd_config"
+          sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config"
+      - run: npm run test:backend
+        env:
+          TEST_HOST: 127.0.0.1
+          TEST_PORT: 2222
+          TEST_USER: tester
+          TEST_PASSWORD: ci-password
+          TEST_KEY: ${{ runner.temp }}/keys/id_plain
+          TEST_ENC_KEY: ${{ runner.temp }}/keys/id_enc
+          TEST_KEY_PASS: ci-pass
+
+  installer:
+    name: Windows installer
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Shellport-installer
+          path: dist/*.exe
+          if-no-files-found: error
+      - name: Attach installer to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          generate_release_notes: true
