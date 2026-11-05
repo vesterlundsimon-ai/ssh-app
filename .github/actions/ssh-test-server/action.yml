@@ -17,7 +17,7 @@ runs:
         ssh-keygen -q -t ed25519 -N 'ci-pass' -f "$RUNNER_TEMP/keys/id_enc"
         sudo mkdir -p /home/tester/.ssh /run/sshd
         cat "$RUNNER_TEMP"/keys/*.pub | sudo tee /home/tester/.ssh/authorized_keys > /dev/null
-        sudo chown -R tester:tester /home/tester/.ssh && sudo chmod 700 /home/tester/.ssh
+        sudo chown -R tester:tester /home/tester/.ssh && sudo chmod 700 /home/tester/.ssh && sudo chmod 600 /home/tester/.ssh/authorized_keys
         printf 'Port 2222\nListenAddress 127.0.0.1\nHostKey /etc/ssh/ssh_host_ed25519_key\nPasswordAuthentication yes\nUsePAM yes\nSubsystem sftp internal-sftp\nPidFile /tmp/sshd-ci.pid\n' > "$RUNNER_TEMP/sshd_config"
         sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config"
         {
