@@ -11,7 +11,7 @@ Shellport handles SSH credentials and connects to servers that may be compromise
 - **Remote servers are untrusted.** Terminal output, file names, error text and login prompts all come from the server and must never be able to run code locally, write outside the folder the user chose, or pose as the app.
 - **The network is untrusted.** Host keys are verified; weak algorithms are off by default.
 - **The UI is less trusted than the main process.** It renders server data, so the main process validates every request from it and never sends secrets back.
-- **Other Windows users and copied data folders** must not be able to read saved passwords.
+- **Other people using the same PC, and copied data folders,** must not be able to read anyone's sessions, saved passwords or host keys without that account's password.
 
 ## Controls
 
@@ -50,10 +50,17 @@ Shellport handles SSH credentials and connects to servers that may be compromise
 - Symlinked folders aren't followed when copying folders; depth and file-count limits stop runaway transfers.
 - Pasting several lines into the terminal asks for confirmation first, since each line may run (on every host, with multi-exec).
 
-### Storage
+### Accounts and storage
 
-- Passwords and key passphrases are encrypted with Electron `safeStorage` (Windows DPAPI): only the Windows user who saved them can decrypt them.
-- Session files are written atomically; `sessions.json` is validated again before it's used to connect.
+- Each account is one vault file (`accounts/<id>.vault.json`) holding its sessions, folders, saved passwords and trusted host keys. Only user names and ids are stored unencrypted (`accounts/index.json`).
+- **Key derivation:** scrypt with N=2^17, r=8, p=1 and a random 16-byte salt per account (OWASP's recommended scrypt setting). Each guess costs about half a second and 128 MB, which makes offline guessing of a stolen vault expensive. Older settings are upgraded automatically at sign-in.
+- **Encryption:** AES-256-GCM with a fresh random 96-bit IV on every write. The header (format, account id, KDF settings) is authenticated too, so any change to the file, or swapping one account's file for another's, makes it refuse to open.
+- **Passwords:** at least 12 characters, no composition rules (in line with NIST SP 800-63B). The password itself is never stored; a wrong password simply fails to decrypt.
+- **Sign-in:** the same error for unknown user names and wrong passwords, with equal work in both cases. After 3 failures for a user name, attempts are delayed (1 s, 2 s, 4 s… up to 60 s).
+- **While signed in**, the key is held only in the main process. Every IPC call except sign-in is refused while signed out. Signing out closes all connections, forgets per-session folder permissions and overwrites the key in memory.
+- **Change password** re-encrypts with a new salt and key and needs the current password. **Delete account** needs the password.
+- **Upgrading from 0.1/0.2:** the first account created takes over the old `sessions.json`, DPAPI-encrypted `secrets.json` and `known_hosts.json`. The old files are deleted only after the new vault has been written and decrypted successfully.
+- Files are written atomically (temp file + rename) and serialised, so a crash can't leave a half-written vault.
 
 ### Build and supply chain
 
@@ -68,5 +75,8 @@ Shellport handles SSH credentials and connects to servers that may be compromise
 - **Installer isn't code-signed**, so Windows can't verify who published it. Check the SHA-256 against `SHA256SUMS.txt` from the same GitHub build.
 - **No post-quantum key exchange.** OpenSSH 9.x prefers `sntrup761x25519` / `mlkem768x25519`; the `ssh2` library doesn't implement them yet. Connections use Curve25519 instead.
 - **Build-tool advisories.** `npm audit` reports moderate ReDoS issues in `minimatch`, used only by electron-builder at build time on our own config. Nothing from it ships in the app.
-- **Saved secrets are only as safe as the Windows account.** Malware running as you can decrypt DPAPI data, as with any password manager.
+- **No password recovery.** A forgotten account password means that account's data is gone. This is the trade-off for not being able to read it without the password.
+- **Accounts are local.** They aren't synced or backed up anywhere; back up `%APPDATA%\Shellport\accounts\` yourself if you need to.
+- **No automatic lock yet.** The app stays signed in until you sign out or close it.
+- **Malware running as you while you're signed in** can read the app's memory, as with any password manager. Encryption protects the data at rest, not a compromised PC.
 - **Uploads can read any file you can.** Files dropped onto the window or picked in a dialog are trusted as your choice.

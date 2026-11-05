@@ -2,6 +2,9 @@
 //   npm run test:unit
 
 import * as path from 'path'
+import * as os from 'os'
+import { promises as fs } from 'fs'
+import { AccountManager, emptyVault } from '../src/main/accounts.ts'
 import { safeLocalName, assertInside, isSafeRemoteName } from '../src/main/sftpOps.ts'
 import { algorithmsFor, MODERN_ALGORITHMS } from '../src/main/sshConnection.ts'
 import * as v from '../src/main/validate.ts'
@@ -82,6 +85,84 @@ check(
     })
   )
 )
+
+// ---- accounts / vault -------------------------------------------------------------------
+async function rejects(p: Promise<unknown>, re?: RegExp): Promise<boolean> {
+  try {
+    await p
+    return false
+  } catch (e) {
+    return re ? re.test((e as Error).message) : true
+  }
+}
+
+async function accountTests(): Promise<void> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shellport-acct-'))
+  const mgr = new AccountManager(dir)
+  const pw = 'correct horse battery staple'
+  const data = emptyVault()
+  data.sessions.push({ id: 's1', name: 'prod db', folderId: null, host: 'db.internal.example', port: 22, username: 'root', authMethod: 'password' })
+  data.secrets.s1 = 'super-secret-db-password'
+  data.knownHosts['db.internal.example'] = [{ type: 'ssh-ed25519', fingerprint: 'SHA256:abc', added: '' }]
+
+  check('rejects short password', await rejects(mgr.create('simon', 'short'), /at least 12/))
+  check('rejects password containing user name', await rejects(mgr.create('simon', 'simon-is-great-123'), /user name/))
+  check('rejects bad user name', await rejects(mgr.create('../evil', pw), /User names/))
+
+  const u = await mgr.create('Simon', pw, data)
+  check('create account', u.username === 'Simon' && u.data.sessions.length === 1)
+  check('user names are case-insensitive and unique', await rejects(mgr.create('simon', pw + '!'), /taken/))
+
+  const raw = await fs.readFile(path.join(dir, `${u.id}.vault.json`), 'utf8')
+  check('vault file has no plaintext', !/db\.internal|super-secret|prod db|root|SHA256:abc/.test(raw))
+
+  check('wrong password rejected', await rejects(mgr.signIn('simon', pw + 'x'), /Wrong user name or password/))
+  check('unknown user gives the same error', await rejects(mgr.signIn('nobody', pw), /Wrong user name or password/))
+
+  const again = await mgr.signIn('SIMON', pw)
+  check('sign in decrypts data', again.data.secrets.s1 === 'super-secret-db-password' && again.data.knownHosts['db.internal.example'][0].type === 'ssh-ed25519')
+
+  // Tampering with the ciphertext or the header makes the vault refuse to open.
+  const file = JSON.parse(raw)
+  const flipped = Buffer.from(file.data, 'base64')
+  flipped[5] ^= 1
+  await fs.writeFile(path.join(dir, `${u.id}.vault.json`), JSON.stringify({ ...file, data: flipped.toString('base64') }))
+  check('tampered ciphertext rejected', await rejects(mgr.signIn('simon', pw)))
+  await fs.writeFile(path.join(dir, `${u.id}.vault.json`), JSON.stringify({ ...file, kdf: { ...file.kdf, N: 2 ** 16 } }))
+  check('tampered header rejected', await rejects(mgr.signIn('simon', pw)))
+  await fs.writeFile(path.join(dir, `${u.id}.vault.json`), raw)
+
+  // Second account can't read the first one's data.
+  const other = await mgr.create('friend', 'another long passphrase here')
+  check('second account starts empty', other.data.sessions.length === 0)
+  const otherFile = path.join(dir, `${other.id}.vault.json`)
+  await fs.copyFile(path.join(dir, `${u.id}.vault.json`), otherFile)
+  check("swapping in another account's vault is rejected", await rejects(mgr.signIn('friend', 'another long passphrase here')))
+  await mgr.save(other)
+
+  // Change password.
+  check('change password needs the current one', await rejects(mgr.changePassword(again, 'nope', 'brand new passphrase 2026'), /current password/))
+  await mgr.changePassword(again, pw, 'brand new passphrase 2026')
+  check('old password stops working', await rejects(mgr.signIn('simon', pw)))
+  await new Promise((r) => setTimeout(r, 2100)) // the failed attempts above trigger a short wait
+  const after = await mgr.signIn('simon', 'brand new passphrase 2026')
+  check('new password works, data kept', after.data.secrets.s1 === 'super-secret-db-password')
+
+  // Throttling after repeated failures.
+  for (let i = 0; i < 3; i++) await rejects(mgr.signIn('friend', 'wrong wrong wrong'))
+  check('repeated failures are throttled', await rejects(mgr.signIn('friend', 'another long passphrase here'), /Too many attempts/))
+
+  // Delete.
+  check('delete needs the password', await rejects(mgr.remove(after, 'nope')))
+  await mgr.remove(after, 'brand new passphrase 2026')
+  check('deleted account is gone', (await rejects(mgr.signIn('simon', 'brand new passphrase 2026'))) && (await mgr.hasAccounts()))
+  const files = await fs.readdir(dir)
+  check('deleted vault file removed', !files.includes(`${u.id}.vault.json`), files.join(','))
+
+  await fs.rm(dir, { recursive: true, force: true })
+}
+
+await accountTests()
 
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed')
 process.exit(failures ? 1 : 0)

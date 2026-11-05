@@ -1,7 +1,6 @@
 import { app, BrowserWindow, dialog, Menu, protocol, session, shell } from 'electron'
 import { promises as fs } from 'fs'
 import * as path from 'path'
-import { store } from './store'
 import { activeConnectionCount, closeAllConnections, registerIpc, setMainWindow } from './ipc'
 
 app.setAppUserModelId('com.shellport.app')
@@ -183,7 +182,6 @@ app.whenReady().then(async () => {
   )
   hardenSession()
   registerAppProtocol()
-  await store.load()
   registerIpc()
   createWindow()
 })

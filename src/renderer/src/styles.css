@@ -845,6 +845,117 @@ textarea {
   transform: rotate(225deg) translate(2px, 2px);
 }
 
+/* ---------- account ---------- */
+
+.account-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  padding: 3px 10px 3px 3px;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.account-btn:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.avatar {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 12px;
+}
+.account-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-danger {
+  background: var(--err);
+  border-color: var(--err);
+  color: #1b0e11;
+  font-weight: 600;
+}
+.btn-danger:hover {
+  background: #ec8594;
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---------- sign in ---------- */
+
+.signin {
+  height: 100%;
+  overflow-y: auto;
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+  background: var(--bg);
+}
+.signin-card {
+  width: min(380px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.signin-brand {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.signin-brand svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2;
+}
+.signin h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.signin-lead {
+  margin: -6px 0 4px;
+  color: var(--muted);
+  max-width: 44ch;
+}
+.signin-warning {
+  margin: 0;
+  padding: 9px 11px;
+  border-left: 2px solid var(--warn);
+  background: rgba(230, 195, 92, 0.08);
+  color: #e9d9a6;
+  font-size: 12.5px;
+}
+.signin-submit {
+  padding: 9px 12px;
+  margin-top: 2px;
+}
+.signin-switch {
+  margin: 4px 0 0;
+  color: var(--muted);
+  text-align: center;
+}
+
 /* ---------- context menu ---------- */
 
 .context-menu {

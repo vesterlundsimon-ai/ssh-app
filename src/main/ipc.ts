@@ -10,12 +10,12 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import { randomUUID } from 'crypto'
 import * as path from 'path'
-import { encryptionAvailable, store } from './store'
+import { store } from './store'
 import { knownKeyTypes, verifyHostKey } from './knownHosts'
 import { SshConnection, type PromptAnswer } from './sshConnection'
 import * as sftpOps from './sftpOps'
 import * as v from './validate'
-import type { AppInfo, ConnStatusEvent, PromptRequest, TransferDirection, TransferProgress } from '../shared/types'
+import type { AppInfo, AuthStatus, ConnStatusEvent, PromptRequest, TransferDirection, TransferProgress } from '../shared/types'
 
 const MAX_CONNECTIONS = 100
 const MAX_WRITE = 1024 * 1024
@@ -61,9 +61,17 @@ function checkSender(e: IpcMainEvent | IpcMainInvokeEvent): void {
 }
 
 type Args = unknown[]
-function handle(channel: string, fn: (...args: Args) => unknown): void {
+interface Opts {
+  /** Allowed while signed out (only the sign-in screen's own calls). */
+  public?: boolean
+}
+function requireSignIn(channel: string, opts?: Opts): void {
+  if (!opts?.public && !store.isSignedIn()) throw new Error(`Signed out (${channel}).`)
+}
+function handle(channel: string, fn: (...args: Args) => unknown, opts?: Opts): void {
   ipcMain.handle(channel, (e, ...args) => {
     checkSender(e)
+    requireSignIn(channel, opts)
     return fn(...args)
   })
 }
@@ -71,6 +79,7 @@ function on(channel: string, fn: (...args: Args) => void): void {
   ipcMain.on(channel, (e, ...args) => {
     try {
       checkSender(e)
+      requireSignIn(channel)
       fn(...args)
     } catch (err) {
       console.warn(`[ipc] ${channel}: ${(err as Error).message}`)
@@ -116,12 +125,68 @@ async function chooseDir(title: string): Promise<string | null> {
 
 // ---- handlers -----------------------------------------------------------------------
 
+function updateTitle(): void {
+  const name = store.username()
+  getWin()?.setTitle(name ? `Shellport · ${name}` : 'Shellport')
+}
+
+/** Sign out: drop every connection, forget per-session permissions, wipe the key. */
+function signOut(): void {
+  closeAllConnections()
+  chosenDownloadDirs.clear()
+  downloadedPaths.clear()
+  store.lock()
+  updateTitle()
+}
+
 export function registerIpc(): void {
-  handle('app:info', async (): Promise<AppInfo> => ({
-    version: app.getVersion(),
-    platform: process.platform,
-    encryptionAvailable: await encryptionAvailable()
-  }))
+  handle(
+    'app:info',
+    async (): Promise<AppInfo> => ({
+      version: app.getVersion(),
+      platform: process.platform,
+      // Saved passwords live in the account's encrypted vault, so saving is always possible.
+      encryptionAvailable: true
+    }),
+    { public: true }
+  )
+
+  // ---- accounts ---------------------------------------------------------------
+  handle(
+    'auth:status',
+    async (): Promise<AuthStatus> => ({
+      signedIn: store.isSignedIn(),
+      username: store.username(),
+      hasAccounts: await store.hasAccounts(),
+      legacySessions: await store.legacySessionCount()
+    }),
+    { public: true }
+  )
+  handle(
+    'auth:create',
+    async (username, password) => {
+      signOut()
+      await store.create(username, password)
+      updateTitle()
+    },
+    { public: true }
+  )
+  handle(
+    'auth:signIn',
+    async (username, password) => {
+      signOut()
+      await store.signIn(username, password)
+      updateTitle()
+    },
+    { public: true }
+  )
+  handle('auth:signOut', () => signOut())
+  handle('auth:changePassword', (current, next) => store.changePassword(current, next))
+  handle('auth:deleteAccount', async (password) => {
+    closeAllConnections()
+    await store.deleteAccount(password)
+    signOut()
+  })
 
   // ---- session store --------------------------------------------------------
   handle('store:get', () => store.getAll())
@@ -194,7 +259,7 @@ export function registerIpc(): void {
         cols,
         rows,
         secret: saved ? await store.getSecret(saved.id) : undefined,
-        canRemember: !!saved && (await encryptionAvailable()),
+        canRemember: !!saved,
         knownHostKeyTypes: await knownKeyTypes(target.host, target.port)
       },
       {

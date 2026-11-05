@@ -110,3 +110,12 @@ export interface AppInfo {
   platform: string
   encryptionAvailable: boolean
 }
+
+export interface AuthStatus {
+  signedIn: boolean
+  username?: string
+  /** Does any account exist on this PC? */
+  hasAccounts: boolean
+  /** Sessions saved by an older version that the first new account will take over. */
+  legacySessions: number
+}

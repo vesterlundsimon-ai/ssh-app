@@ -3,6 +3,7 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type {
   AppInfo,
+  AuthStatus,
   ConnectRequest,
   ConnStatusEvent,
   Folder,
@@ -22,6 +23,15 @@ function on<T extends unknown[]>(channel: string, fn: (...args: T) => void): () 
 
 const api = {
   appInfo: (): Promise<AppInfo> => ipcRenderer.invoke('app:info'),
+
+  auth: {
+    status: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:status'),
+    create: (username: string, password: string): Promise<void> => ipcRenderer.invoke('auth:create', username, password),
+    signIn: (username: string, password: string): Promise<void> => ipcRenderer.invoke('auth:signIn', username, password),
+    signOut: (): Promise<void> => ipcRenderer.invoke('auth:signOut'),
+    changePassword: (current: string, next: string): Promise<void> => ipcRenderer.invoke('auth:changePassword', current, next),
+    deleteAccount: (password: string): Promise<void> => ipcRenderer.invoke('auth:deleteAccount', password)
+  },
 
   store: {
     get: (): Promise<SessionStoreData> => ipcRenderer.invoke('store:get'),

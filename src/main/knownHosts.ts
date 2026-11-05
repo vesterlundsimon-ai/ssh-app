@@ -1,39 +1,25 @@
-// Host key verification (trust on first use), stored in known_hosts.json.
+// Host key verification (trust on first use), stored in the account's vault.
 //
 // First connection to a host: show the fingerprint and ask the user to trust it.
 // Later connections: silently accept a matching key; on a mismatch show a loud
 // warning (possible man-in-the-middle) and refuse unless the user explicitly
 // replaces the stored key.
 
-import { app, BrowserWindow, dialog } from 'electron'
+import { BrowserWindow, dialog } from 'electron'
 import { createHash } from 'crypto'
-import { promises as fs } from 'fs'
-import * as path from 'path'
-
-interface KnownKey {
-  type: string
-  fingerprint: string // SHA256:base64 (OpenSSH style)
-  added: string
-}
+import { store } from './store'
+import type { KnownKey } from './accounts'
 
 type KnownHostsFile = Record<string, KnownKey[]>
 
-function file(): string {
-  return path.join(app.getPath('userData'), 'known_hosts.json')
-}
-
+// Trusted host keys are kept per account, inside the encrypted vault, so nobody can
+// quietly swap a key in a file on disk.
 async function load(): Promise<KnownHostsFile> {
-  try {
-    return JSON.parse(await fs.readFile(file(), 'utf8')) as KnownHostsFile
-  } catch {
-    return {}
-  }
+  return store.getKnownHosts()
 }
 
 async function save(data: KnownHostsFile): Promise<void> {
-  await fs.mkdir(path.dirname(file()), { recursive: true })
-  await fs.writeFile(`${file()}.tmp`, JSON.stringify(data, null, 2), 'utf8')
-  await fs.rename(`${file()}.tmp`, file())
+  await store.setKnownHosts(data)
 }
 
 /** Key type is the first SSH string inside the raw public key blob. */

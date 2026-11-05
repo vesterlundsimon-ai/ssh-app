@@ -50,3 +50,27 @@ export function parentDir(dir: string): string {
   const i = trimmed.lastIndexOf('/')
   return i <= 0 ? '/' : trimmed.slice(0, i)
 }
+
+/** Strip Electron's "Error invoking remote method 'x': Error: " prefix. */
+export function cleanError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e)
+  return msg.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+}
+
+export const LAST_USER_KEY = 'lastUsername'
+
+export function readLocal(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function writeLocal(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    /* storage unavailable */
+  }
+}

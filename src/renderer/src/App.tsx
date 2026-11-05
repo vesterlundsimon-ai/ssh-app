@@ -6,8 +6,9 @@ import { SessionEditor } from './components/SessionEditor'
 import { SftpPanel, type TransferItem } from './components/SftpPanel'
 import { PromptDialog } from './components/PromptDialog'
 import { ContextMenu, type MenuState } from './components/ContextMenu'
+import { ChangePasswordDialog, DeleteAccountDialog } from './components/AccountDialogs'
 import { getTerminal, writeToTerminal } from './lib/terminals'
-import { parseQuickConnect, uid } from './lib/util'
+import { LAST_USER_KEY, parseQuickConnect, readLocal, uid, writeLocal } from './lib/util'
 
 interface Target {
   host: string
@@ -41,7 +42,12 @@ function loadNumber(key: string, fallback: number): number {
   }
 }
 
-export default function App(): React.JSX.Element {
+interface AppProps {
+  username: string
+  onSignedOut: () => void
+}
+
+export default function App({ username, onSignedOut }: AppProps): React.JSX.Element {
   const [data, setData] = useState<SessionStoreData>(EMPTY)
   const [info, setInfo] = useState<AppInfo | null>(null)
   const [tabs, setTabs] = useState<Tab[]>([])
@@ -58,6 +64,7 @@ export default function App(): React.JSX.Element {
   const [quick, setQuick] = useState('')
   const [quickError, setQuickError] = useState('')
   const [notice, setNotice] = useState('')
+  const [accountDialog, setAccountDialog] = useState<'password' | 'delete' | null>(null)
 
   // Refs so long-lived listeners always see current state.
   const tabsRef = useRef(tabs)
@@ -307,6 +314,28 @@ export default function App(): React.JSX.Element {
     await reloadStore()
   }
 
+  // ---- account -------------------------------------------------------------------
+  const signOut = async (): Promise<void> => {
+    const open = tabsRef.current.filter((t) => t.status === 'connected' || t.status === 'connecting').length
+    if (open && !window.confirm(`Sign out? ${open} open connection${open === 1 ? '' : 's'} will close.`)) return
+    await window.api.auth.signOut()
+    onSignedOut()
+  }
+
+  const accountMenu = (e: React.MouseEvent<HTMLButtonElement>): void => {
+    const r = e.currentTarget.getBoundingClientRect()
+    setMenu({
+      x: r.right - 200,
+      y: r.bottom + 4,
+      items: [
+        { label: 'Change password…', onClick: () => setAccountDialog('password') },
+        { label: 'Sign out', onClick: () => void signOut() },
+        'separator',
+        { label: 'Delete account…', danger: true, onClick: () => setAccountDialog('delete') }
+      ]
+    })
+  }
+
   // ---- tab context menu ----------------------------------------------------------
   const tabMenu = (e: React.MouseEvent, t: Tab): void => {
     e.preventDefault()
@@ -406,6 +435,13 @@ export default function App(): React.JSX.Element {
           aria-pressed={multiExec}
         >
           {multiExec ? `Multi-exec on (${multiCount})` : 'Multi-exec'}
+        </button>
+        <span className="spacer" />
+        <button className="account-btn" onClick={accountMenu} aria-haspopup="menu" title="Account">
+          <span className="avatar" aria-hidden>
+            {username.slice(0, 1).toUpperCase()}
+          </span>
+          <span className="account-name">{username}</span>
         </button>
       </header>
 
@@ -575,6 +611,26 @@ export default function App(): React.JSX.Element {
           onAnswer={(answers, remember) => {
             window.api.prompt.respond({ promptId: prompt.promptId, answers, remember })
             setPrompts((p) => p.slice(1))
+          }}
+        />
+      )}
+
+      {accountDialog === 'password' && (
+        <ChangePasswordDialog
+          onClose={() => setAccountDialog(null)}
+          onDone={() => {
+            setAccountDialog(null)
+            showNotice('Password changed.')
+          }}
+        />
+      )}
+      {accountDialog === 'delete' && (
+        <DeleteAccountDialog
+          username={username}
+          onClose={() => setAccountDialog(null)}
+          onDone={() => {
+            if (readLocal(LAST_USER_KEY) === username) writeLocal(LAST_USER_KEY, '')
+            onSignedOut()
           }}
         />
       )}

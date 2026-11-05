@@ -1,88 +1,160 @@
-// Persistent storage for sessions, folders and secrets.
+// The signed-in account's sessions, folders, secrets and host keys.
 //
-// sessions.json  – plain JSON, no secrets.
-// secrets.json   – passwords / key passphrases, each encrypted with Electron's
-//                  safeStorage (DPAPI on Windows: only readable by this Windows user).
+// Everything lives in the account's encrypted vault (./accounts, ./vault). While nobody
+// is signed in, the store is empty and every method throws.
+//
+// Before accounts existed (v0.1–0.2) data lived in sessions.json / secrets.json /
+// known_hosts.json. The first account created on a PC takes that data over, and the
+// old files are deleted once the vault has been written and read back.
 
 import { app, safeStorage } from 'electron'
 import { promises as fs } from 'fs'
 import * as path from 'path'
+import { AccountManager, emptyVault, sanitizeVault, type KnownKey, type Unlocked, type VaultData } from './accounts'
+import { deriveKey, unseal, parseVaultFile } from './vault'
 import type { Folder, Session, SessionSaveRequest, SessionStoreData } from '../shared/types'
 
-const EMPTY: SessionStoreData = { version: 1, folders: [], sessions: [] }
-
-function dataDir(): string {
-  return app.getPath('userData')
-}
-
-async function readJson<T>(file: string, fallback: T): Promise<T> {
-  try {
-    return JSON.parse(await fs.readFile(file, 'utf8')) as T
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return fallback
-    // Corrupt file: keep a copy so nothing is silently lost, then start fresh.
-    try {
-      await fs.copyFile(file, `${file}.corrupt-${Date.now()}`)
-    } catch {
-      /* ignore */
-    }
-    return fallback
+export class SignedOutError extends Error {
+  constructor() {
+    super('You are signed out.')
   }
 }
 
-/** Write atomically (tmp file + rename) so a crash never leaves a half-written file. */
-async function writeJson(file: string, data: unknown): Promise<void> {
-  await fs.mkdir(path.dirname(file), { recursive: true })
-  const tmp = `${file}.tmp`
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
-  await fs.rename(tmp, file)
+function legacyFiles(): { sessions: string; secrets: string; knownHosts: string } {
+  const dir = app.getPath('userData')
+  return {
+    sessions: path.join(dir, 'sessions.json'),
+    secrets: path.join(dir, 'secrets.json'),
+    knownHosts: path.join(dir, 'known_hosts.json')
+  }
 }
 
-export async function encryptionAvailable(): Promise<boolean> {
+async function readJsonIfExists(file: string): Promise<unknown> {
   try {
-    return await safeStorage.isAsyncEncryptionAvailable()
+    return JSON.parse(await fs.readFile(file, 'utf8'))
   } catch {
-    return false
+    return undefined
   }
+}
+
+/** Data saved by Shellport 0.1–0.2, or null if there is none. */
+async function readLegacy(): Promise<VaultData | null> {
+  const files = legacyFiles()
+  const [sessionsRaw, secretsRaw, hostsRaw] = await Promise.all([
+    readJsonIfExists(files.sessions),
+    readJsonIfExists(files.secrets),
+    readJsonIfExists(files.knownHosts)
+  ])
+  if (sessionsRaw === undefined && secretsRaw === undefined && hostsRaw === undefined) return null
+  const s = (sessionsRaw ?? {}) as { folders?: unknown; sessions?: unknown }
+
+  // Old secrets were encrypted with Windows DPAPI; decrypt them so they can move into the vault.
+  const secrets: Record<string, string> = {}
+  if (secretsRaw && typeof secretsRaw === 'object') {
+    for (const [id, enc] of Object.entries(secretsRaw as Record<string, unknown>)) {
+      if (typeof enc !== 'string') continue
+      try {
+        secrets[id] = (await safeStorage.decryptStringAsync(Buffer.from(enc, 'base64'))).result
+      } catch {
+        /* saved by another Windows user; skip */
+      }
+    }
+  }
+  return sanitizeVault({ folders: s.folders, sessions: s.sessions, secrets, knownHosts: hostsRaw })
+}
+
+async function deleteLegacy(): Promise<void> {
+  const files = legacyFiles()
+  await Promise.all(Object.values(files).map((f) => fs.rm(f, { force: true })))
 }
 
 class Store {
-  private data: SessionStoreData = EMPTY
-  private secrets: Record<string, string> = {} // sessionId -> base64(encrypted)
-  private loaded = false
-  private queue: Promise<void> = Promise.resolve()
+  private accounts: AccountManager | null = null
+  private current: Unlocked | null = null
 
-  private get sessionsFile(): string {
-    return path.join(dataDir(), 'sessions.json')
-  }
-  private get secretsFile(): string {
-    return path.join(dataDir(), 'secrets.json')
+  private get mgr(): AccountManager {
+    this.accounts ??= new AccountManager(path.join(app.getPath('userData'), 'accounts'))
+    return this.accounts
   }
 
-  async load(): Promise<void> {
-    if (this.loaded) return
-    this.data = await readJson(this.sessionsFile, structuredClone(EMPTY))
-    this.data.folders ??= []
-    this.data.sessions ??= []
-    this.secrets = await readJson(this.secretsFile, {})
-    this.loaded = true
+  private get u(): Unlocked {
+    if (!this.current) throw new SignedOutError()
+    return this.current
   }
 
-  /** Serialise writes so two quick saves can't interleave. */
+  private get data(): VaultData {
+    return this.u.data
+  }
+
   private persist(): Promise<void> {
-    const snapshot = structuredClone(this.data)
-    const secrets = { ...this.secrets }
-    this.queue = this.queue.then(async () => {
-      await writeJson(this.sessionsFile, snapshot)
-      await writeJson(this.secretsFile, secrets)
-    })
-    return this.queue
+    return this.mgr.save(this.u)
   }
+
+  // ---- accounts ------------------------------------------------------------------
+
+  isSignedIn(): boolean {
+    return this.current !== null
+  }
+
+  username(): string | undefined {
+    return this.current?.username
+  }
+
+  hasAccounts(): Promise<boolean> {
+    return this.mgr.hasAccounts()
+  }
+
+  /** How many sessions the first new account will take over from an older version. */
+  async legacySessionCount(): Promise<number> {
+    if (await this.mgr.hasAccounts()) return 0
+    const legacy = await readLegacy()
+    return legacy ? legacy.sessions.length : 0
+  }
+
+  async create(username: unknown, password: unknown): Promise<void> {
+    this.lock()
+    const firstAccount = !(await this.mgr.hasAccounts())
+    const legacy = firstAccount ? await readLegacy() : null
+    const u = await this.mgr.create(username, password, legacy ?? emptyVault())
+    if (legacy) {
+      // Only delete the old files once the new vault is safely on disk and opens.
+      const file = parseVaultFile(
+        await fs.readFile(path.join(app.getPath('userData'), 'accounts', `${u.id}.vault.json`), 'utf8')
+      )
+      const check = sanitizeVault(unseal(file, await deriveKey(String(password), file.kdf)))
+      if (check.sessions.length === legacy.sessions.length) await deleteLegacy()
+    }
+    this.current = u
+  }
+
+  async signIn(username: unknown, password: unknown): Promise<void> {
+    this.lock()
+    this.current = await this.mgr.signIn(username, password)
+  }
+
+  async changePassword(current: unknown, next: unknown): Promise<void> {
+    await this.mgr.changePassword(this.u, current, next)
+  }
+
+  async deleteAccount(password: unknown): Promise<void> {
+    await this.mgr.remove(this.u, password)
+    this.lock()
+  }
+
+  /** Forget the key and all decrypted data. */
+  lock(): void {
+    if (!this.current) return
+    this.current.key.fill(0)
+    this.current = null
+  }
+
+  // ---- sessions & folders ----------------------------------------------------------
 
   getAll(): SessionStoreData {
     return {
-      ...this.data,
-      sessions: this.data.sessions.map((s) => ({ ...s, hasSecret: !!this.secrets[s.id] }))
+      version: 1,
+      folders: structuredClone(this.data.folders),
+      sessions: this.data.sessions.map((s) => ({ ...s, hasSecret: !!this.data.secrets[s.id] }))
     }
   }
 
@@ -92,76 +164,75 @@ class Store {
 
   async saveSession(req: SessionSaveRequest): Promise<void> {
     const { hasSecret: _ignored, ...session } = req.session
-    const i = this.data.sessions.findIndex((s) => s.id === session.id)
-    if (i >= 0) this.data.sessions[i] = session
-    else this.data.sessions.push(session)
-    if (req.secret !== undefined) await this.encryptInto(session.id, req.secret)
+    const list = this.data.sessions
+    const i = list.findIndex((s) => s.id === session.id)
+    if (i >= 0) list[i] = session
+    else list.push(session)
+    if (req.secret !== undefined) this.putSecret(session.id, req.secret)
     await this.persist()
   }
 
   async deleteSession(id: string): Promise<void> {
     this.data.sessions = this.data.sessions.filter((s) => s.id !== id)
-    delete this.secrets[id]
+    delete this.data.secrets[id]
     await this.persist()
   }
 
   async saveFolder(folder: Folder): Promise<void> {
-    const i = this.data.folders.findIndex((f) => f.id === folder.id)
-    if (i >= 0) this.data.folders[i] = folder
-    else this.data.folders.push(folder)
+    const list = this.data.folders
+    const i = list.findIndex((f) => f.id === folder.id)
+    if (i >= 0) list[i] = folder
+    else list.push(folder)
     await this.persist()
   }
 
   /** Delete a folder; its sessions and sub-folders move up to the parent. */
   async deleteFolder(id: string): Promise<void> {
-    const folder = this.data.folders.find((f) => f.id === id)
+    const d = this.data
+    const folder = d.folders.find((f) => f.id === id)
     if (!folder) return
-    for (const f of this.data.folders) if (f.parentId === id) f.parentId = folder.parentId
-    for (const s of this.data.sessions) if (s.folderId === id) s.folderId = folder.parentId
-    this.data.folders = this.data.folders.filter((f) => f.id !== id)
+    for (const f of d.folders) if (f.parentId === id) f.parentId = folder.parentId
+    for (const s of d.sessions) if (s.folderId === id) s.folderId = folder.parentId
+    d.folders = d.folders.filter((f) => f.id !== id)
     await this.persist()
   }
 
   /** Replace the whole tree (used for drag-and-drop reordering). */
-  async replaceAll(data: SessionStoreData): Promise<void> {
-    const ids = new Set(data.sessions.map((s) => s.id))
-    for (const id of Object.keys(this.secrets)) if (!ids.has(id)) delete this.secrets[id]
-    this.data = {
-      version: 1,
-      folders: data.folders,
-      sessions: data.sessions.map(({ hasSecret: _h, ...s }) => s)
-    }
+  async replaceAll(next: SessionStoreData): Promise<void> {
+    const d = this.data
+    const ids = new Set(next.sessions.map((s) => s.id))
+    for (const id of Object.keys(d.secrets)) if (!ids.has(id)) delete d.secrets[id]
+    d.folders = next.folders
+    d.sessions = next.sessions.map(({ hasSecret: _h, ...s }) => s)
     await this.persist()
   }
 
-  // ---- secrets -------------------------------------------------------------
+  // ---- secrets -----------------------------------------------------------------------
 
-  private async encryptInto(sessionId: string, secret: string): Promise<void> {
-    if (!secret) {
-      delete this.secrets[sessionId]
-      return
-    }
-    if (!(await encryptionAvailable())) {
-      throw new Error('Secure storage is not available on this system, so the password was not saved.')
-    }
-    this.secrets[sessionId] = (await safeStorage.encryptStringAsync(secret)).toString('base64')
+  private putSecret(sessionId: string, secret: string): void {
+    if (secret) this.data.secrets[sessionId] = secret
+    else delete this.data.secrets[sessionId]
   }
 
   async setSecret(sessionId: string, secret: string): Promise<void> {
-    await this.encryptInto(sessionId, secret)
+    if (!this.getSession(sessionId)) return
+    this.putSecret(sessionId, secret)
     await this.persist()
   }
 
   async getSecret(sessionId: string): Promise<string | undefined> {
-    const enc = this.secrets[sessionId]
-    if (!enc) return undefined
-    try {
-      const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(Buffer.from(enc, 'base64'))
-      if (shouldReEncrypt) void this.setSecret(sessionId, result)
-      return result
-    } catch {
-      return undefined // e.g. the file was copied from another Windows account
-    }
+    return this.data.secrets[sessionId]
+  }
+
+  // ---- host keys ---------------------------------------------------------------------
+
+  getKnownHosts(): Record<string, KnownKey[]> {
+    return structuredClone(this.data.knownHosts)
+  }
+
+  async setKnownHosts(db: Record<string, KnownKey[]>): Promise<void> {
+    this.data.knownHosts = structuredClone(db)
+    await this.persist()
   }
 }
 

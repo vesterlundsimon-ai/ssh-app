@@ -1,7 +1,7 @@
 {
   "name": "shellport",
   "productName": "Shellport",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A tabbed SSH/SFTP client for Windows, inspired by MobaXterm",
   "author": "Simon Vesterlund",
   "license": "MIT",
