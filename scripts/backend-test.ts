@@ -203,6 +203,24 @@ async function main(): Promise<void> {
     check('refused port gives a clear error', st === 'error' && /refused/i.test(r.states.at(-1) ?? ''), r.states.join(', '))
   }
 
+  // 9. post-quantum key exchange against OpenSSH 10 (only when a PQ-only server is configured)
+  if (process.env.TEST_PQ_PORT) {
+    for (const [label, opts] of [
+      ['key', { authMethod: 'key', keyPath: env('TEST_KEY') }],
+      ['password', { secret: env('TEST_PASSWORD') }]
+    ] as const) {
+      let kex = ''
+      const r = start({ port: Number(process.env.TEST_PQ_PORT), ...opts })
+      ;(r.conn as unknown as { hooks: { onNegotiated?: (n: { kex: string }) => void } }).hooks.onNegotiated = (n) => (kex = n.kex)
+      const st = await r.ready
+      check(`post-quantum kex with OpenSSH 10 (${label} login)`, st === 'connected' && kex === 'mlkem768x25519-sha256', `${r.states.join(', ')} kex=${kex}`)
+      check(`post-quantum session runs commands (${label})`, await runCommand(r, 'pq'))
+      r.conn.close()
+    }
+  } else {
+    console.log('SKIP  post-quantum interop (set TEST_PQ_PORT to an OpenSSH 10 server)')
+  }
+
   console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed')
   process.exit(failures ? 1 : 0)
 }

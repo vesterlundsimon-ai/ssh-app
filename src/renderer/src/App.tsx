@@ -27,6 +27,14 @@ interface Tab {
   message?: string
   target: Target
   sftpStartDir?: string
+  /** Key exchange and cipher agreed with the server. */
+  kex?: string
+  cipher?: string
+}
+
+/** Hybrid ML-KEM methods protect recorded traffic against future quantum computers. */
+function isPostQuantum(kex?: string): boolean {
+  return !!kex && /^(mlkem|sntrup)/.test(kex)
 }
 
 const EMPTY: SessionStoreData = { version: 1, folders: [], sessions: [] }
@@ -44,7 +52,8 @@ function loadNumber(key: string, fallback: number): number {
 
 interface AppProps {
   username: string
-  onSignedOut: () => void
+  /** notice: shown on the sign-in screen (e.g. why the app signed you out). */
+  onSignedOut: (notice?: string) => void
 }
 
 export default function App({ username, onSignedOut }: AppProps): React.JSX.Element {
@@ -66,6 +75,43 @@ export default function App({ username, onSignedOut }: AppProps): React.JSX.Elem
   const [notice, setNotice] = useState('')
   const [accountDialog, setAccountDialog] = useState<'password' | 'delete' | null>(null)
   const [update, setUpdate] = useState<UpdateStatus | null>(null)
+  const [idleWarning, setIdleWarning] = useState<number | null>(null) // sign-out time (ms)
+  const [now, setNow] = useState(() => Date.now())
+
+  // ---- automatic sign-out after inactivity ----------------------------------------
+  const idleWarningRef = useRef(idleWarning)
+  idleWarningRef.current = idleWarning
+  useEffect(() => {
+    let lastSent = 0
+    const onActivity = (): void => {
+      const t = Date.now()
+      // Report at most every 20 s, but right away while the warning is showing.
+      if (idleWarningRef.current !== null || t - lastSent > 20_000) {
+        lastSent = t
+        window.api.idle.activity()
+      }
+    }
+    const events = ['keydown', 'mousedown', 'wheel', 'mousemove', 'touchstart'] as const
+    for (const ev of events) window.addEventListener(ev, onActivity, { capture: true, passive: true })
+    const offs = [
+      window.api.idle.onWarning((w) => {
+        setNow(Date.now())
+        setIdleWarning(w ? w.signOutAt : null)
+      }),
+      window.api.auth.onSignedOut((info) =>
+        onSignedOut(`You were signed out because SimSSH wasn't used for ${info.minutes} minutes.`)
+      )
+    ]
+    return () => {
+      for (const ev of events) window.removeEventListener(ev, onActivity, { capture: true })
+      offs.forEach((off) => off())
+    }
+  }, [onSignedOut])
+  useEffect(() => {
+    if (idleWarning === null) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [idleWarning])
 
   // Refs so long-lived listeners always see current state.
   const tabsRef = useRef(tabs)
@@ -91,6 +137,9 @@ export default function App({ username, onSignedOut }: AppProps): React.JSX.Elem
       window.api.store.onChanged(() => void reloadStore()),
       window.api.update.onStatus(setUpdate),
       window.api.ssh.onData((id, d) => writeToTerminal(id, d)),
+      window.api.ssh.onNegotiated((connId, n) =>
+        setTabs((ts) => ts.map((t) => (t.id === connId ? { ...t, kex: n.kex, cipher: n.cipher } : t)))
+      ),
       window.api.ssh.onStatus(({ connId, state, message }) => {
         setTabs((ts) => ts.map((t) => (t.id === connId ? { ...t, status: state, message } : t)))
         if (state === 'closed' || state === 'error') {
@@ -117,7 +166,7 @@ export default function App({ username, onSignedOut }: AppProps): React.JSX.Elem
 
   // ---- tabs & connections --------------------------------------------------------
   const connect = useCallback((tab: Tab, cols: number, rows: number) => {
-    setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, status: 'connecting', message: undefined } : t)))
+    setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, status: 'connecting', message: undefined, kex: undefined, cipher: undefined } : t)))
     const { host, port, username, authMethod, keyPath } = tab.target
     writeToTerminal(tab.id, `${DIM}Connecting to ${username}@${host}${port !== 22 ? ':' + port : ''}…${RESET}\r\n`)
     window.api.ssh
@@ -620,6 +669,14 @@ export default function App({ username, onSignedOut }: AppProps): React.JSX.Elem
                 <span className="muted">
                   {active.target.username}@{active.target.host}:{active.target.port}
                 </span>
+                {active.status === 'connected' && active.kex && (
+                  <span
+                    className={`kex ${isPostQuantum(active.kex) ? 'pq' : ''}`}
+                    title={`Key exchange: ${active.kex}\nCipher: ${active.cipher ?? ''}`}
+                  >
+                    {isPostQuantum(active.kex) ? 'Post-quantum key exchange' : `Key exchange: ${active.kex}`}
+                  </span>
+                )}
               </>
             ) : (
               <span className="muted">No open tabs</span>
@@ -670,6 +727,23 @@ export default function App({ username, onSignedOut }: AppProps): React.JSX.Elem
             onSignedOut()
           }}
         />
+      )}
+
+      {idleWarning !== null && (
+        <div className="modal-backdrop">
+          <div className="modal modal-narrow" role="alertdialog" aria-labelledby="idle-title">
+            <h2 id="idle-title">Still there?</h2>
+            <p className="modal-message">
+              SimSSH hasn't been used for a while. You'll be signed out in{' '}
+              {Math.max(0, Math.ceil((idleWarning - now) / 1000))} seconds, and open connections will close.
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-primary" autoFocus onClick={() => window.api.idle.activity()}>
+                Stay signed in
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}

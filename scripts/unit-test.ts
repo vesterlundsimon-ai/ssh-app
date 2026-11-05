@@ -58,10 +58,23 @@ check('remote names: accepts normal', isSafeRemoteName('.bashrc') && isSafeRemot
 const flat = (a: typeof MODERN_ALGORITHMS): string[] => Object.values(a).flat()
 const modern = flat(algorithmsFor(false))
 check('modern policy has no SHA-1 / CBC / ssh-rsa / DSA', !modern.some((x) => /sha1|cbc|^ssh-rsa$|ssh-dss|3des|md5/.test(x)), modern.filter((x) => /sha1|cbc|^ssh-rsa$|dss/.test(x)).join(','))
-check('legacy policy adds them after modern ones', algorithmsFor(true).kex.at(-1) === 'diffie-hellman-group1-sha1' && algorithmsFor(true).kex[0] === 'curve25519-sha256')
+check('legacy policy adds them after modern ones', algorithmsFor(true).kex.at(-1) === 'diffie-hellman-group1-sha1' && algorithmsFor(true).kex[0] === algorithmsFor(false).kex[0])
 const pref = algorithmsFor(false, ['ssh-rsa']).serverHostKey
 check('known RSA host prefers rsa-sha2, still no ssh-rsa (SHA-1)', pref[0] === 'rsa-sha2-512' && !pref.includes('ssh-rsa'), pref.join(','))
 check('known ecdsa host asks for ecdsa first', algorithmsFor(false, ['ecdsa-sha2-nistp256']).serverHostKey[0] === 'ecdsa-sha2-nistp256')
+
+// ---- post-quantum key exchange ----------------------------------------------------------
+{
+  const nodeCrypto = await import('node:crypto')
+  const hasMlkem = typeof (nodeCrypto as unknown as { encapsulate?: unknown }).encapsulate === 'function'
+  const kex = algorithmsFor(false).kex
+  if (hasMlkem) {
+    check('post-quantum kex is offered first', kex[0] === 'mlkem768x25519-sha256', kex.slice(0, 3).join(','))
+  } else {
+    console.log('SKIP  post-quantum kex (this Node.js has no ML-KEM; Electron and Node 24 do)')
+  }
+  check('Curve25519 stays as the fallback', kex.includes('curve25519-sha256'))
+}
 
 // ---- IPC validation ------------------------------------------------------------------
 check('host: accepts names and IPs', ['server.example.com', '10.0.0.1', '::1', '[fe80::1%eth0]', 'my_host'].every((h) => !throws(() => v.host(h))))

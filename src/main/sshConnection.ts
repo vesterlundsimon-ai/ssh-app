@@ -43,6 +43,8 @@ export interface ConnectionHooks {
   }): Promise<PromptAnswer>
   onData(data: Uint8Array): void
   onStatus(state: ConnState, message?: string): void
+  /** The algorithms agreed with the server, once the handshake is done. */
+  onNegotiated?(info: { kex: string; cipher: string; hostKey: string }): void
   saveSecret(secret: string): void
 }
 
@@ -55,6 +57,9 @@ const MAX_ATTEMPTS = 3
  */
 export const MODERN_ALGORITHMS = {
   kex: [
+    // Hybrid post-quantum (ML-KEM-768 + X25519), OpenSSH 10's default. Added to ssh2 by
+    // scripts/patch-ssh2.mjs; used whenever the server supports it.
+    'mlkem768x25519-sha256',
     'curve25519-sha256',
     'curve25519-sha256@libssh.org',
     'ecdh-sha2-nistp256',
@@ -192,6 +197,9 @@ export class SshConnection {
     this.hooks.onStatus('connecting')
     const c = this.client
 
+    c.on('handshake', (n) => {
+      this.hooks.onNegotiated?.({ kex: n.kex, cipher: n.cs.cipher, hostKey: n.serverHostKey })
+    })
     c.on('ready', () => {
       if (this.pendingRemember !== undefined) this.hooks.saveSecret(this.pendingRemember)
       this.openShell()

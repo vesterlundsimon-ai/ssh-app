@@ -127,15 +127,50 @@ async function chooseDir(title: string): Promise<string | null> {
 
 // ---- handlers -----------------------------------------------------------------------
 
+// ---- automatic sign-out after inactivity ----------------------------------------
+// The UI reports activity (keys, clicks, scrolling, mouse movement over the window).
+// The timer lives here in the main process, so it can't be switched off from the UI.
+
+// SIMSSH_TEST_IDLE_SECONDS shortens the timeout for testing; the installed app ignores it.
+const testIdleSeconds = app.isPackaged ? 0 : Number(process.env.SIMSSH_TEST_IDLE_SECONDS) || 0
+export const IDLE_SIGN_OUT_MS = testIdleSeconds > 0 ? testIdleSeconds * 1000 : 30 * 60 * 1000
+const IDLE_WARNING_MS = 60 * 1000
+let lastActivity = Date.now()
+let idleWarned = false
+
+function markActive(): void {
+  lastActivity = Date.now()
+  if (idleWarned) {
+    idleWarned = false
+    send('idle:warning', null)
+  }
+}
+
+function checkIdle(): void {
+  if (!store.isSignedIn()) return
+  const idle = Date.now() - lastActivity
+  if (idle >= IDLE_SIGN_OUT_MS) {
+    signOut()
+    send('auth:signedOut', { reason: 'idle', minutes: Math.max(1, Math.round(IDLE_SIGN_OUT_MS / 60000)) })
+  } else if (idle >= IDLE_SIGN_OUT_MS - IDLE_WARNING_MS && !idleWarned) {
+    idleWarned = true
+    send('idle:warning', { signOutAt: lastActivity + IDLE_SIGN_OUT_MS })
+  }
+}
+
 /** Sign out: drop every connection, forget per-session permissions, wipe the key. */
 function signOut(): void {
   closeAllConnections()
   chosenDownloadDirs.clear()
   downloadedPaths.clear()
   store.lock()
+  idleWarned = false
 }
 
 export function registerIpc(): void {
+  setInterval(checkIdle, 5000).unref()
+  on('app:activity', () => markActive())
+
   handle(
     'app:info',
     async (): Promise<AppInfo> => ({
@@ -174,6 +209,7 @@ export function registerIpc(): void {
     async (username, password) => {
       signOut()
       await store.create(username, password)
+      markActive()
     },
     { public: true }
   )
@@ -182,6 +218,7 @@ export function registerIpc(): void {
     async (username, password) => {
       signOut()
       await store.signIn(username, password)
+      markActive()
     },
     { public: true }
   )
@@ -271,6 +308,7 @@ export function registerIpc(): void {
         verifyHost: (h, p, key) => verifyHostKey(h, p, key, getWin()),
         prompt: askUser,
         onData: (data) => send('ssh:data', connId, data),
+        onNegotiated: (n) => send('ssh:negotiated', connId, n),
         onStatus: (state, message) => {
           // Error text can contain server-supplied strings; strip control characters so it
           // can't smuggle escape sequences into the terminal where it is printed.

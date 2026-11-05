@@ -37,7 +37,8 @@ SimSSH handles SSH credentials and connects to servers that may be compromised o
 ### SSH
 
 - Host key checking (trust on first use) with a SHA-256 fingerprint prompt. A **changed** key, or a key of a **different type** for a known host, shows a man-in-the-middle warning and disconnects by default. Known key types are requested first, so an attacker can't downgrade to a different key type.
-- Modern algorithms only by default, in line with current OpenSSH: Curve25519/ECDH/DH-SHA2 key exchange; Ed25519, ECDSA and RSA-SHA2 host keys; AES-GCM/CTR (and ChaCha20-Poly1305 where the runtime supports it); SHA-2 MACs. SHA-1, CBC, `ssh-rsa` (SHA-1) and DSA need the per-session **Allow legacy algorithms** option.
+- **Post-quantum key exchange**: `mlkem768x25519-sha256` (ML-KEM-768 + X25519, as in draft-ietf-sshm-mlkem-hybrid-kex and OpenSSH 10's default) is offered first. ML-KEM comes from the runtime's native crypto (Electron's BoringSSL), not from a JavaScript library. `ssh2` doesn't implement it, so `scripts/patch-ssh2.mjs` adds it to the pinned ssh2 1.17.0 before every build and test, and refuses to run against any other ssh2 version. CI checks it on every push against an OpenSSH 10.6 server that accepts nothing else. Servers without it fall back to Curve25519.
+- Modern algorithms only by default, in line with current OpenSSH: ML-KEM hybrid, Curve25519, ECDH and DH-SHA2 key exchange; Ed25519, ECDSA and RSA-SHA2 host keys; AES-GCM/CTR (and ChaCha20-Poly1305 where the runtime supports it); SHA-2 MACs. SHA-1, CBC, `ssh-rsa` (SHA-1) and DSA need the per-session **Allow legacy algorithms** option.
 - Strict key exchange is negotiated, mitigating the Terrapin attack (CVE-2023-48795).
 - No agent forwarding and no X11 forwarding.
 - Keyboard-interactive prompts are labelled as coming from the server.
@@ -57,6 +58,7 @@ SimSSH handles SSH credentials and connects to servers that may be compromised o
 - **Encryption:** AES-256-GCM with a fresh random 96-bit IV on every write. The header (format, account id, KDF settings) is authenticated too, so any change to the file, or swapping one account's file for another's, makes it refuse to open.
 - **Passwords:** at least 12 characters, no composition rules (in line with NIST SP 800-63B). The password itself is never stored; a wrong password simply fails to decrypt.
 - **Sign-in:** the same error for unknown user names and wrong passwords, with equal work in both cases. After 3 failures for a user name, attempts are delayed (1 s, 2 s, 4 s… up to 60 s).
+- **Automatic sign-out** after 30 minutes without keyboard or mouse use in the app, with a one-minute warning. The timer runs in the main process, so the UI can't disable it. Signing out closes all connections.
 - **While signed in**, the key is held only in the main process. Every IPC call except sign-in is refused while signed out. Signing out closes all connections, forgets per-session folder permissions and overwrites the key in memory.
 - **Change password** re-encrypts with a new salt and key and needs the current password. **Delete account** needs the password.
 - **Rename to SimSSH (0.4):** accounts are moved from `%APPDATA%\Shellport\` to `%APPDATA%\SimSSH\` on first start, copied under temporary names and renamed into place before the originals are removed; existing data in the new folder is never overwritten. The vault format id stays `shellport-vault`, because it's part of every vault's authenticated header.
@@ -67,8 +69,8 @@ SimSSH handles SSH credentials and connects to servers that may be compromised o
 
 - Runs every day on GitHub Actions (`security.yml`, logic in `scripts/security-update.mjs`).
 - Only applies **compatible** fixes: `npm audit fix` without `--force`, and Electron updates within the current major version. Anything needing a major upgrade, or with no fix published, is reported as an issue instead of changed.
-- A fix is only released after package signatures are verified and the typecheck, unit tests and SSH/SFTP tests pass on the fixed code, and the installer builds.
-- Trade-off: fix releases go out without a person reviewing them, and the in-app updater offers them to everyone. That's why the job is limited to compatible updates of existing packages and never adds new ones.
+- Fixes are only proposed after package signatures are verified and the typecheck, unit tests and SSH/SFTP tests pass on the fixed code.
+- **Nothing is released without a person.** The job opens a pull request; only merging it (`security-release.yml`) tags and publishes a release. The release job only acts on merged pull requests from this repository's own `security/daily-fixes` branch.
 
 ### Updates
 
@@ -88,10 +90,9 @@ SimSSH handles SSH credentials and connects to servers that may be compromised o
 ## Known limitations
 
 - **Installer isn't code-signed**, so Windows can't verify who published it. Check the SHA-256 against `SHA256SUMS.txt` from the same GitHub build.
-- **No post-quantum key exchange.** OpenSSH 9.x prefers `sntrup761x25519` / `mlkem768x25519`; the `ssh2` library doesn't implement them yet. Connections use Curve25519 instead.
+- **Post-quantum needs OpenSSH 9.9+ on the server.** `sntrup761x25519-sha512` (OpenSSH 9.0–9.8's default) isn't implemented, so those servers use Curve25519. The ML-KEM code is a small, tested addition to `ssh2`, not an independently audited implementation.
 - **Build-tool advisories.** `npm audit` reports moderate ReDoS issues in `minimatch`, used only by electron-builder at build time on our own config. Nothing from it ships in the app.
 - **No password recovery.** A forgotten account password means that account's data is gone. This is the trade-off for not being able to read it without the password.
 - **Accounts are local.** They aren't synced or backed up anywhere; back up `%APPDATA%\SimSSH\accounts\` yourself if you need to.
-- **No automatic lock yet.** The app stays signed in until you sign out or close it.
 - **Malware running as you while you're signed in** can read the app's memory, as with any password manager. Encryption protects the data at rest, not a compromised PC.
 - **Uploads can read any file you can.** Files dropped onto the window or picked in a dialog are trusted as your choice.

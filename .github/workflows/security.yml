@@ -1,15 +1,16 @@
 name: Daily security check
 
-# Every day: audit what ships in the app, apply safe fixes, and if anything changed,
-# test it, tag a new patch version and publish a release (which the in-app updater
-# then offers). Anything that needs a person becomes a GitHub issue.
+# Every day: audit what ships in the app and apply safe fixes. If anything changed and
+# all tests pass, open (or update) a pull request and ask the repo owner to review it.
+# Nothing is released until that pull request is merged; merging it publishes the
+# release (see security-release.yml). Anything that needs a person becomes an issue.
 on:
   schedule:
     - cron: '23 4 * * *' # 05:23 Stockholm in winter, 06:23 in summer
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Check and fix, but don't push or release
+        description: Check and fix, but don't open a pull request
         type: boolean
         default: false
 
@@ -20,26 +21,27 @@ concurrency:
   group: security-check
   cancel-in-progress: false
 
+env:
+  BRANCH: security/daily-fixes
+
 jobs:
   scan:
-    name: Scan and fix
+    name: Scan, fix and propose
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
-      contents: write # push the fix commit and tag
+      contents: write # push the proposal branch
+      pull-requests: write # open the pull request for review
       issues: write # report what needs a person
-    outputs:
-      tag: ${{ steps.push.outputs.tag }}
-      notes: ${{ steps.notes.outputs.notes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
-          # Needed to push the fix commit and tag with this job's token.
+          # Needed to push the proposal branch with this job's token.
           persist-credentials: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm audit signatures
@@ -48,7 +50,7 @@ jobs:
         id: fix
         run: node scripts/security-update.mjs
 
-      # Everything below only runs when a fix was applied: prove it still works before shipping it.
+      # Prove the fix still works before proposing it.
       - name: Reinstall with the fixed lockfile
         if: steps.fix.outputs.changed == 'true'
         run: npm ci --ignore-scripts
@@ -64,31 +66,54 @@ jobs:
       - if: steps.fix.outputs.changed == 'true'
         run: npm run test:backend
 
-      - name: Pass the release notes on
-        id: notes
-        if: steps.fix.outputs.changed == 'true'
-        run: |
-          {
-            echo 'notes<<NOTES_EOF'
-            cat release-notes.md
-            echo
-            echo 'NOTES_EOF'
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Commit, tag and push
-        id: push
+      - name: Open or update the pull request
         if: steps.fix.outputs.changed == 'true' && !inputs.dry_run
         env:
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.fix.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$BRANCH"
           git add package.json package-lock.json
           { echo "Security update (v$VERSION)"; echo; cat release-notes.md; } > commit-message.txt
           git commit -q -F commit-message.txt
-          git tag -a "v$VERSION" -m "SimSSH $VERSION (automatic security update)"
-          git push origin HEAD:main "v$VERSION"
-          echo "tag=refs/tags/v$VERSION" >> "$GITHUB_OUTPUT"
+          git push --force origin "$BRANCH"
+
+          # The release notes go between the markers; security-release.yml uses them.
+          {
+            echo "This pull request was opened by the [daily security check]($RUN_URL)."
+            echo
+            echo "**Nothing has been released.** Merging this pull request builds and publishes **SimSSH $VERSION**, and the in-app updater then offers it to everyone."
+            echo
+            echo "Already checked on this branch: package signatures, typecheck, unit tests and SSH/SFTP tests against a real server."
+            echo
+            echo '<!-- release-notes -->'
+            cat release-notes.md
+            echo '<!-- /release-notes -->'
+          } > pr-body.md
+
+          title="Security update: SimSSH $VERSION"
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --repo "$GITHUB_REPOSITORY" --title "$title" --body-file pr-body.md
+            gh pr comment "$existing" --repo "$GITHUB_REPOSITORY" --body "Updated with today's fixes. See the [run]($RUN_URL)."
+          elif ! gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$title" --body-file pr-body.md --reviewer "$OWNER" \
+            && ! gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$title" --body-file pr-body.md; then
+            # Actions may not be allowed to open pull requests in this repo: say how to finish by hand.
+            compare="${{ github.server_url }}/${{ github.repository }}/compare/main...$BRANCH?expand=1"
+            {
+              echo "The daily security check prepared **SimSSH $VERSION** on the branch \`$BRANCH\`, but couldn't open a pull request."
+              echo
+              echo "1. [Open the pull request]($compare) and paste in the text below, or turn on **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests** so this happens automatically next time."
+              echo "2. Merge it to build and publish the release."
+              echo
+              cat pr-body.md
+            } > issue-body.md
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title is ready for review" --body-file issue-body.md
+          fi
 
       - name: Report what needs a person
         if: steps.fix.outputs.attention == 'true' && !inputs.dry_run
@@ -117,20 +142,9 @@ jobs:
             true
           } >> "$GITHUB_STEP_SUMMARY"
 
-  release:
-    name: Build and release
-    needs: scan
-    if: needs.scan.outputs.tag != ''
-    permissions:
-      contents: write
-    uses: ./.github/workflows/build.yml
-    with:
-      ref: ${{ needs.scan.outputs.tag }}
-      release_notes: ${{ needs.scan.outputs.notes }}
-
   report-failure:
     name: Report a failed run
-    needs: [scan, release]
+    needs: scan
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
@@ -142,4 +156,4 @@ jobs:
         run: |
           gh issue create --repo "$GITHUB_REPOSITORY" \
             --title "Daily security check failed ($(date -u +%Y-%m-%d))" \
-            --body "The daily security check failed, so no fix was released. If a fix was tagged, its release was not published. See the [run log]($RUN_URL)."
+            --body "The daily security check failed, for example because a fix broke a test, so nothing was proposed. See the [run log]($RUN_URL)."

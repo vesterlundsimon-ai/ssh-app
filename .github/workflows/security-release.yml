@@ -1,0 +1,69 @@
+name: Release approved security update
+
+# Runs when you merge a pull request opened by the daily security check: tags the new
+# version on main and builds, tests and publishes the release. Merging is the approval.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    name: Tag the approved version
+    # Only merged pull requests from this repository's own security branch.
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref == 'security/daily-fixes' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the tag, delete the branch
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: true
+      - name: Release notes from the pull request
+        id: notes
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          notes=$(printf '%s\n' "$BODY" | sed -n '/<!-- release-notes -->/,/<!-- \/release-notes -->/p' | sed '1d;$d')
+          {
+            echo 'notes<<NOTES_EOF'
+            printf '%s\n' "$notes"
+            echo "Approved in #${{ github.event.pull_request.number }}."
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+      - name: Tag
+        id: tag
+        env:
+          MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "::error::Tag v$version already exists. Bump the version on the branch and merge again."
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "v$version" -m "SimSSH $version (security update approved by $MERGED_BY)"
+          git push origin "v$version"
+          git push origin --delete security/daily-fixes || true
+          echo "tag=refs/tags/v$version" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Build and release
+    needs: tag
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.tag.outputs.tag }}
+      release_notes: ${{ needs.tag.outputs.notes }}

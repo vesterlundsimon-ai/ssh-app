@@ -1,24 +1,25 @@
 {
   "name": "simssh",
   "productName": "SimSSH",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "A tabbed SSH/SFTP client for Windows, inspired by MobaXterm",
   "author": "Simon Vesterlund",
   "license": "MIT",
   "private": true,
   "main": "out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "npm run -s patch:ssh2 && electron-vite dev",
+    "build": "npm run -s patch:ssh2 && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test:backend": "node --experimental-transform-types --no-warnings scripts/backend-test.ts",
-    "dist:win": "electron-vite build && electron-builder --win nsis --x64 --publish never",
-    "test:unit": "node --experimental-transform-types --no-warnings scripts/unit-test.ts"
+    "test:backend": "npm run -s patch:ssh2 && node --experimental-transform-types --no-warnings scripts/backend-test.ts",
+    "dist:win": "npm run -s build && electron-builder --win nsis --x64 --publish never",
+    "test:unit": "npm run -s patch:ssh2 && node --experimental-transform-types --no-warnings scripts/unit-test.ts",
+    "patch:ssh2": "node scripts/patch-ssh2.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.11",
-    "ssh2": "^1.17.0"
+    "ssh2": "1.17.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

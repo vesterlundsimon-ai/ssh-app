@@ -608,6 +608,22 @@ textarea {
   white-space: nowrap;
   overflow: hidden;
 }
+.kex {
+  color: var(--faint);
+}
+.kex.pq {
+  color: var(--ok);
+}
+.kex.pq::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 8px;
+  margin-right: 6px;
+  border: 1.4px solid currentColor;
+  border-radius: 1px 1px 3px 3px;
+  vertical-align: -1px;
+}
 .notice {
   color: var(--warn);
 }
@@ -954,6 +970,13 @@ textarea {
   margin: -6px 0 4px;
   color: var(--muted);
   max-width: 44ch;
+}
+.signin-notice {
+  margin: -4px 0 2px;
+  padding: 9px 11px;
+  border-left: 2px solid var(--accent);
+  background: var(--accent-soft);
+  font-size: 12.5px;
 }
 .signin-warning {
   margin: 0;

@@ -4,12 +4,14 @@ import { cleanError, LAST_USER_KEY, readLocal, writeLocal } from '../lib/util'
 
 interface Props {
   status: AuthStatus
+  /** Why you're seeing this screen, e.g. signed out after inactivity. */
+  notice?: string
   onSignedIn: () => void
 }
 
 const MIN_PASSWORD = 12
 
-export function SignIn({ status, onSignedIn }: Props): React.JSX.Element {
+export function SignIn({ status, notice, onSignedIn }: Props): React.JSX.Element {
   const [mode, setMode] = useState<'signIn' | 'create'>(status.hasAccounts ? 'signIn' : 'create')
   const [username, setUsername] = useState(() => (status.hasAccounts ? readLocal(LAST_USER_KEY) : ''))
   const [password, setPassword] = useState('')
@@ -78,6 +80,11 @@ export function SignIn({ status, onSignedIn }: Props): React.JSX.Element {
           </svg>
         </div>
         <h1>{creating ? (status.hasAccounts ? 'Create an account' : 'Create your account') : 'Sign in to SimSSH'}</h1>
+        {notice && !creating && (
+          <p className="signin-notice" role="status">
+            {notice}
+          </p>
+        )}
         {creating && (
           <p className="signin-lead">
             Your sessions, saved passwords and trusted host keys are encrypted with this password.

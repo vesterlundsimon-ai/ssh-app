@@ -39,7 +39,16 @@ const api = {
     signIn: (username: string, password: string): Promise<void> => ipcRenderer.invoke('auth:signIn', username, password),
     signOut: (): Promise<void> => ipcRenderer.invoke('auth:signOut'),
     changePassword: (current: string, next: string): Promise<void> => ipcRenderer.invoke('auth:changePassword', current, next),
-    deleteAccount: (password: string): Promise<void> => ipcRenderer.invoke('auth:deleteAccount', password)
+    deleteAccount: (password: string): Promise<void> => ipcRenderer.invoke('auth:deleteAccount', password),
+    /** Signed out by the app itself (after 30 minutes without use). */
+    onSignedOut: (fn: (info: { reason: 'idle'; minutes: number }) => void) => on('auth:signedOut', fn)
+  },
+
+  idle: {
+    /** Tell the app the user is active (resets the automatic sign-out timer). */
+    activity: (): void => ipcRenderer.send('app:activity'),
+    /** null = warning cleared. */
+    onWarning: (fn: (w: { signOutAt: number } | null) => void) => on('idle:warning', fn)
   },
 
   store: {
@@ -60,7 +69,9 @@ const api = {
     resize: (connId: string, cols: number, rows: number): void => ipcRenderer.send('ssh:resize', connId, cols, rows),
     close: (connId: string): void => ipcRenderer.send('ssh:close', connId),
     onData: (fn: (connId: string, data: Uint8Array) => void) => on('ssh:data', fn),
-    onStatus: (fn: (e: ConnStatusEvent) => void) => on('ssh:status', fn)
+    onStatus: (fn: (e: ConnStatusEvent) => void) => on('ssh:status', fn),
+    onNegotiated: (fn: (connId: string, n: { kex: string; cipher: string; hostKey: string }) => void) =>
+      on('ssh:negotiated', fn)
   },
 
   prompt: {

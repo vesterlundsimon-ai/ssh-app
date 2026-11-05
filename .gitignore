@@ -6,3 +6,5 @@ dist/
 release-notes.md
 attention.md
 commit-message.txt
+pr-body.md
+issue-body.md

@@ -8,6 +8,8 @@ A tabbed SSH and SFTP client for Windows, in the spirit of MobaXterm. (Called Sh
 - **Tabbed SSH terminal** with password, private key (OpenSSH/PEM, encrypted or not) and SSH agent (Windows OpenSSH agent or Pageant) login. Keyboard-interactive and 2FA prompts are supported.
 - **Saved sessions** in nested folders, with search, colours, notes, drag-and-drop to reorganise, duplicate and quick connect (`user@host:port`).
 - **Saved passwords and key passphrases** are stored only inside your encrypted account. They never reach the UI layer.
+- **Post-quantum key exchange**: connections to servers with OpenSSH 9.9 or newer use `mlkem768x25519-sha256` (ML-KEM-768 + X25519), so recorded traffic stays safe even against a future quantum computer. The status bar shows **Post-quantum key exchange** when it's in use; older servers fall back to Curve25519.
+- **Automatic sign-out** after 30 minutes without use, with a one-minute warning. Open connections close.
 - **Host key checking**: first connection shows the fingerprint; a changed key shows a man-in-the-middle warning and refuses unless you replace it.
 - **SFTP file browser** for the active tab: drag files or folders in from Explorer to upload, double-click to download, rename, new folder, recursive delete, sortable columns, transfer progress.
 - **Multi-exec**: type once, run on every ticked tab. Broadcasting tabs and the banner turn orange so you always know.
@@ -59,10 +61,13 @@ npm run test:backend
 
 1. Audits the packages that ship in the app and applies every fix that isn't a breaking (major) upgrade.
 2. Moves Electron to the newest release of its current major version (Electron's patch releases carry the Chromium and Node.js security fixes).
-3. If anything changed: verifies package signatures, runs the typecheck, unit tests and SSH/SFTP tests, bumps the patch version, pushes a commit and tag, builds the installer and publishes the release. The in-app updater then offers it.
-4. Opens a GitHub issue for anything that needs a person: a vulnerability with no compatible fix, an Electron version that's out of support, or a failed run.
+3. If anything changed: verifies package signatures, runs the typecheck, unit tests and SSH/SFTP tests, bumps the patch version and **opens a pull request** (`security/daily-fixes`) with you as reviewer. Nothing is released yet.
+4. **Merging that pull request is the approval**: `security-release.yml` then tags the version, builds and tests the installer, and publishes the release, which the in-app updater offers to everyone. If you don't merge, nothing ships; the next run updates the same pull request.
+5. Opens a GitHub issue for anything that needs a person: a vulnerability with no compatible fix, an Electron version that's out of support, or a failed run.
 
-Run it by hand from **Actions → Daily security check → Run workflow**. Tick **dry run** to see what it would do without pushing or releasing.
+For the pull request to open automatically, turn on **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**. Without it, you get an issue with a link to open the pull request yourself.
+
+Run it by hand from **Actions → Daily security check → Run workflow**. Tick **dry run** to see what it would do without opening a pull request.
 
 ### Releasing
 
@@ -89,5 +94,4 @@ src/shared/      Types shared by both sides
 - Macros
 - X11 forwarding (using VcXsrv or WSLg as the X server)
 - Edit remote files in a local editor and upload on save
-- Lock automatically after a period of inactivity
 - Export / import an account (to move it to another PC)
