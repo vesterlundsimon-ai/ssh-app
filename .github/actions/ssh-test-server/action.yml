@@ -1,0 +1,27 @@
+name: SSH test server
+description: Starts a throwaway OpenSSH server on 127.0.0.1:2222 with a test user and keys, and sets the TEST_* variables the backend tests read.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        sudo apt-get update -qq && sudo apt-get install -y -qq openssh-server
+        sudo useradd -m -s /bin/bash tester
+        echo 'tester:ci-password' | sudo chpasswd
+        mkdir -p "$RUNNER_TEMP/keys"
+        ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/keys/id_plain"
+        ssh-keygen -q -t ed25519 -N 'ci-pass' -f "$RUNNER_TEMP/keys/id_enc"
+        sudo mkdir -p /home/tester/.ssh /run/sshd
+        cat "$RUNNER_TEMP"/keys/*.pub | sudo tee /home/tester/.ssh/authorized_keys > /dev/null
+        sudo chown -R tester:tester /home/tester/.ssh && sudo chmod 700 /home/tester/.ssh
+        printf 'Port 2222\nListenAddress 127.0.0.1\nHostKey /etc/ssh/ssh_host_ed25519_key\nPasswordAuthentication yes\nUsePAM yes\nSubsystem sftp internal-sftp\nPidFile /tmp/sshd-ci.pid\n' > "$RUNNER_TEMP/sshd_config"
+        sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd_config"
+        {
+          echo "TEST_HOST=127.0.0.1"
+          echo "TEST_PORT=2222"
+          echo "TEST_USER=tester"
+          echo "TEST_PASSWORD=ci-password"
+          echo "TEST_KEY=$RUNNER_TEMP/keys/id_plain"
+          echo "TEST_ENC_KEY=$RUNNER_TEMP/keys/id_enc"
+          echo "TEST_KEY_PASS=ci-pass"
+        } >> "$GITHUB_ENV"

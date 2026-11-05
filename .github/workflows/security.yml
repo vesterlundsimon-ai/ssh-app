@@ -1,0 +1,145 @@
+name: Daily security check
+
+# Every day: audit what ships in the app, apply safe fixes, and if anything changed,
+# test it, tag a new patch version and publish a release (which the in-app updater
+# then offers). Anything that needs a person becomes a GitHub issue.
+on:
+  schedule:
+    - cron: '23 4 * * *' # 05:23 Stockholm in winter, 06:23 in summer
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Check and fix, but don't push or release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-check
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Scan and fix
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # push the fix commit and tag
+      issues: write # report what needs a person
+    outputs:
+      tag: ${{ steps.push.outputs.tag }}
+      notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          # Needed to push the fix commit and tag with this job's token.
+          persist-credentials: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm audit signatures
+
+      - name: Check and apply safe fixes
+        id: fix
+        run: node scripts/security-update.mjs
+
+      # Everything below only runs when a fix was applied: prove it still works before shipping it.
+      - name: Reinstall with the fixed lockfile
+        if: steps.fix.outputs.changed == 'true'
+        run: npm ci --ignore-scripts
+      - name: Verify package signatures of the fixed dependencies
+        if: steps.fix.outputs.changed == 'true'
+        run: npm audit signatures
+      - if: steps.fix.outputs.changed == 'true'
+        run: npm run typecheck
+      - if: steps.fix.outputs.changed == 'true'
+        uses: ./.github/actions/ssh-test-server
+      - if: steps.fix.outputs.changed == 'true'
+        run: npm run test:unit
+      - if: steps.fix.outputs.changed == 'true'
+        run: npm run test:backend
+
+      - name: Pass the release notes on
+        id: notes
+        if: steps.fix.outputs.changed == 'true'
+        run: |
+          {
+            echo 'notes<<NOTES_EOF'
+            cat release-notes.md
+            echo
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Commit, tag and push
+        id: push
+        if: steps.fix.outputs.changed == 'true' && !inputs.dry_run
+        env:
+          VERSION: ${{ steps.fix.outputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json
+          { echo "Security update (v$VERSION)"; echo; cat release-notes.md; } > commit-message.txt
+          git commit -q -F commit-message.txt
+          git tag -a "v$VERSION" -m "SimSSH $VERSION (automatic security update)"
+          git push origin HEAD:main "v$VERSION"
+          echo "tag=refs/tags/v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Report what needs a person
+        if: steps.fix.outputs.attention == 'true' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='Security: manual action needed'
+          body="$(cat attention.md)
+
+          Found by the [daily security check]($RUN_URL)."
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## Daily security check'
+            if [ "${{ steps.fix.outputs.changed }}" = 'true' ]; then cat release-notes.md; else echo 'Nothing to fix today.'; fi
+            [ -s attention.md ] && { echo; cat attention.md; }
+            true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Build and release
+    needs: scan
+    if: needs.scan.outputs.tag != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.scan.outputs.tag }}
+      release_notes: ${{ needs.scan.outputs.notes }}
+
+  report-failure:
+    name: Report a failed run
+    needs: [scan, release]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Daily security check failed ($(date -u +%Y-%m-%d))" \
+            --body "The daily security check failed, so no fix was released. If a fix was tagged, its release was not published. See the [run log]($RUN_URL)."

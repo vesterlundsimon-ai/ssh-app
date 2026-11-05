@@ -63,6 +63,13 @@ SimSSH handles SSH credentials and connects to servers that may be compromised o
 - **Upgrading from 0.1/0.2:** the first account created takes over the old `sessions.json`, DPAPI-encrypted `secrets.json` and `known_hosts.json`. The old files are deleted only after the new vault has been written and decrypted successfully.
 - Files are written atomically (temp file + rename) and serialised, so a crash can't leave a half-written vault.
 
+### Daily security check
+
+- Runs every day on GitHub Actions (`security.yml`, logic in `scripts/security-update.mjs`).
+- Only applies **compatible** fixes: `npm audit fix` without `--force`, and Electron updates within the current major version. Anything needing a major upgrade, or with no fix published, is reported as an issue instead of changed.
+- A fix is only released after package signatures are verified and the typecheck, unit tests and SSH/SFTP tests pass on the fixed code, and the installer builds.
+- Trade-off: fix releases go out without a person reviewing them, and the in-app updater offers them to everyone. That's why the job is limited to compatible updates of existing packages and never adds new ones.
+
 ### Updates
 
 - Updates come only from this repository's GitHub Releases over HTTPS (`electron-updater`, GitHub provider). Nothing downloads until you click **Update**; pre-releases and older versions are never offered.

@@ -3,3 +3,6 @@ out/
 dist/
 *.log
 .DS_Store
+release-notes.md
+attention.md
+commit-message.txt

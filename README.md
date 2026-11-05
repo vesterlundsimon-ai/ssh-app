@@ -53,6 +53,17 @@ TEST_KEY=path/to/unencrypted_key TEST_ENC_KEY=path/to/encrypted_key TEST_KEY_PAS
 npm run test:backend
 ```
 
+### Daily security check
+
+`.github/workflows/security.yml` runs every morning on GitHub. It:
+
+1. Audits the packages that ship in the app and applies every fix that isn't a breaking (major) upgrade.
+2. Moves Electron to the newest release of its current major version (Electron's patch releases carry the Chromium and Node.js security fixes).
+3. If anything changed: verifies package signatures, runs the typecheck, unit tests and SSH/SFTP tests, bumps the patch version, pushes a commit and tag, builds the installer and publishes the release. The in-app updater then offers it.
+4. Opens a GitHub issue for anything that needs a person: a vulnerability with no compatible fix, an Electron version that's out of support, or a failed run.
+
+Run it by hand from **Actions → Daily security check → Run workflow**. Tick **dry run** to see what it would do without pushing or releasing.
+
 ### Releasing
 
 The in-app updater reads `latest.yml` and the `.blockmap` from the newest GitHub release, which the **Build** workflow attaches automatically. Bump `version` in `package.json` before releasing; the updater only offers versions newer than the one installed.
