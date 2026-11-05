@@ -86,13 +86,7 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - name: Check the packaged app includes post-quantum key exchange
-        shell: pwsh
-        run: |
-          npx --no-install @electron/asar extract-file dist/win-unpacked/resources/app.asar node_modules/ssh2/lib/protocol/kex.js
-          if (-not (Select-String -Path kex.js -Pattern 'simssh-patch: mlkem768x25519-sha256' -Quiet)) {
-            Write-Error 'The packaged ssh2 is missing the mlkem768x25519-sha256 patch.'
-            exit 1
-          }
+        run: node scripts/check-package.mjs
       - name: Record installer checksum
         shell: pwsh
         run: Get-ChildItem dist/*.exe | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } | Out-File -Encoding ascii dist/SHA256SUMS.txt
