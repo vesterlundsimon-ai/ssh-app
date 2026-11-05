@@ -20,7 +20,7 @@ interface Props {
   openMenu: (m: MenuState) => void
 }
 
-const DND_TYPE = 'application/x-shellport-item'
+const DND_TYPE = 'application/x-simssh-item'
 
 function isDescendant(folders: Folder[], maybeChild: string | null, ancestor: string): boolean {
   let cur = maybeChild

@@ -87,19 +87,19 @@ async function main(): Promise<void> {
     const sftp = await r.conn.sftp()
     const home = await sftpOps.realpath(sftp, '.')
     check('sftp realpath home', home.startsWith('/'), home)
-    const remoteDir = `${home}/shellport-test-${Date.now()}`
+    const remoteDir = `${home}/simssh-test-${Date.now()}`
     await sftpOps.mkdir(sftp, remoteDir)
 
-    const local = await fs.mkdtemp(path.join(os.tmpdir(), 'shellport-'))
+    const local = await fs.mkdtemp(path.join(os.tmpdir(), 'simssh-'))
     const srcDir = path.join(local, 'payload')
     await fs.mkdir(path.join(srcDir, 'nested'), { recursive: true })
     const big = Buffer.alloc(3 * 1024 * 1024 + 123, 7)
     await fs.writeFile(path.join(srcDir, 'big.bin'), big)
-    await fs.writeFile(path.join(srcDir, 'nested', 'hello.txt'), 'hello from shellport\n')
+    await fs.writeFile(path.join(srcDir, 'nested', 'hello.txt'), 'hello from simssh\n')
 
     let lastProgress: [number, number] = [0, 0]
     await sftpOps.upload(sftp, srcDir, remoteDir, (t, tot) => (lastProgress = [t, tot]))
-    check('upload folder reports full progress', lastProgress[0] === lastProgress[1] && lastProgress[1] === big.length + 21, String(lastProgress))
+    check('upload folder reports full progress', lastProgress[0] === lastProgress[1] && lastProgress[1] === big.length + Buffer.byteLength('hello from simssh\n'), String(lastProgress))
 
     const listing = await sftpOps.list(sftp, `${remoteDir}/payload`)
     check(
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
     const again2 = await sftpOps.download(sftp, `${remoteDir}/payload/renamed.bin`, dlDir, () => undefined)
     const dlBig = await fs.readFile(path.join(got, 'renamed.bin'))
     const dlTxt = await fs.readFile(path.join(got, 'nested', 'hello.txt'), 'utf8')
-    check('download folder matches', dlBig.equals(big) && dlTxt === 'hello from shellport\n')
+    check('download folder matches', dlBig.equals(big) && dlTxt === 'hello from simssh\n')
     check('download never overwrites', path.basename(again) === 'renamed.bin' && path.basename(again2) === 'renamed (1).bin', `${again} ${again2}`)
 
     // Hostile file names: a Windows path-traversal name, a reserved device name, a link loop.

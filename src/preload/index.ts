@@ -80,6 +80,6 @@ const api = {
   showItemInFolder: (p: string): void => ipcRenderer.send('shell:showItem', p)
 }
 
-export type ShellportApi = typeof api
+export type SimSSHApi = typeof api
 
 contextBridge.exposeInMainWorld('api', api)

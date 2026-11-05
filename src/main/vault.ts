@@ -17,6 +17,8 @@ export interface KdfParams {
 }
 
 export interface VaultFile {
+  // "shellport" is the app's former name. It's part of the authenticated header of
+  // every existing vault, so it must never change or old accounts won't open.
   format: 'shellport-vault'
   version: 1
   id: string
@@ -136,7 +138,7 @@ export function parseVaultFile(raw: string): VaultFile {
     typeof f.tag !== 'string' ||
     typeof f.data !== 'string'
   ) {
-    throw new CorruptVaultError('The account file is damaged or from a newer version of Shellport.')
+    throw new CorruptVaultError('The account file is damaged or from a newer version of SimSSH.')
   }
   checkKdf(f.kdf)
   return f

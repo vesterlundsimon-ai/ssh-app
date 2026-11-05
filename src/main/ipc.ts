@@ -46,7 +46,7 @@ function send(channel: string, ...args: unknown[]): void {
 function appUrlPrefix(): string {
   const dev = process.env['ELECTRON_RENDERER_URL']
   if (dev && !app.isPackaged) return new URL(dev).origin + '/'
-  return 'app://shellport/'
+  return 'app://simssh/'
 }
 
 function checkSender(e: IpcMainEvent | IpcMainInvokeEvent): void {
@@ -112,7 +112,7 @@ function isInside(parent: string, child: string): boolean {
 function uploadPath(p: unknown): string {
   const lp = v.str(p, 'local path', 4096)
   if (!path.isAbsolute(lp)) throw new Error('Invalid local path.')
-  if (isInside(app.getPath('userData'), lp)) throw new Error("Shellport's own data folder can't be uploaded.")
+  if (isInside(app.getPath('userData'), lp)) throw new Error("SimSSH's own data folder can't be uploaded.")
   return lp
 }
 
@@ -127,7 +127,7 @@ async function chooseDir(title: string): Promise<string | null> {
 
 function updateTitle(): void {
   const name = store.username()
-  getWin()?.setTitle(name ? `Shellport · ${name}` : 'Shellport')
+  getWin()?.setTitle(name ? `SimSSH · ${name}` : 'SimSSH')
 }
 
 /** Sign out: drop every connection, forget per-session permissions, wipe the key. */

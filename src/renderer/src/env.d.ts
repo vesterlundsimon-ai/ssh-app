@@ -1,8 +1,8 @@
-import type { ShellportApi } from '../../preload/index'
+import type { SimSSHApi } from '../../preload/index'
 
 declare global {
   interface Window {
-    api: ShellportApi
+    api: SimSSHApi
   }
 }
 

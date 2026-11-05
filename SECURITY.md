@@ -6,7 +6,7 @@ Open a private security advisory on GitHub (Security → Report a vulnerability)
 
 ## Threat model
 
-Shellport handles SSH credentials and connects to servers that may be compromised or hostile. The design assumes:
+SimSSH handles SSH credentials and connects to servers that may be compromised or hostile. The design assumes:
 
 - **Remote servers are untrusted.** Terminal output, file names, error text and login prompts all come from the server and must never be able to run code locally, write outside the folder the user chose, or pose as the app.
 - **The network is untrusted.** Host keys are verified; weak algorithms are off by default.
@@ -59,6 +59,7 @@ Shellport handles SSH credentials and connects to servers that may be compromise
 - **Sign-in:** the same error for unknown user names and wrong passwords, with equal work in both cases. After 3 failures for a user name, attempts are delayed (1 s, 2 s, 4 s… up to 60 s).
 - **While signed in**, the key is held only in the main process. Every IPC call except sign-in is refused while signed out. Signing out closes all connections, forgets per-session folder permissions and overwrites the key in memory.
 - **Change password** re-encrypts with a new salt and key and needs the current password. **Delete account** needs the password.
+- **Rename to SimSSH (0.4):** accounts are moved from `%APPDATA%\Shellport\` to `%APPDATA%\SimSSH\` on first start, copied under temporary names and renamed into place before the originals are removed; existing data in the new folder is never overwritten. The vault format id stays `shellport-vault`, because it's part of every vault's authenticated header.
 - **Upgrading from 0.1/0.2:** the first account created takes over the old `sessions.json`, DPAPI-encrypted `secrets.json` and `known_hosts.json`. The old files are deleted only after the new vault has been written and decrypted successfully.
 - Files are written atomically (temp file + rename) and serialised, so a crash can't leave a half-written vault.
 
@@ -76,7 +77,7 @@ Shellport handles SSH credentials and connects to servers that may be compromise
 - **No post-quantum key exchange.** OpenSSH 9.x prefers `sntrup761x25519` / `mlkem768x25519`; the `ssh2` library doesn't implement them yet. Connections use Curve25519 instead.
 - **Build-tool advisories.** `npm audit` reports moderate ReDoS issues in `minimatch`, used only by electron-builder at build time on our own config. Nothing from it ships in the app.
 - **No password recovery.** A forgotten account password means that account's data is gone. This is the trade-off for not being able to read it without the password.
-- **Accounts are local.** They aren't synced or backed up anywhere; back up `%APPDATA%\Shellport\accounts\` yourself if you need to.
+- **Accounts are local.** They aren't synced or backed up anywhere; back up `%APPDATA%\SimSSH\accounts\` yourself if you need to.
 - **No automatic lock yet.** The app stays signed in until you sign out or close it.
 - **Malware running as you while you're signed in** can read the app's memory, as with any password manager. Encryption protects the data at rest, not a compromised PC.
 - **Uploads can read any file you can.** Files dropped onto the window or picked in a dialog are trusted as your choice.

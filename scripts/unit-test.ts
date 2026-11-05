@@ -97,7 +97,7 @@ async function rejects(p: Promise<unknown>, re?: RegExp): Promise<boolean> {
 }
 
 async function accountTests(): Promise<void> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shellport-acct-'))
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'simssh-acct-'))
   const mgr = new AccountManager(dir)
   const pw = 'correct horse battery staple'
   const data = emptyVault()

@@ -589,7 +589,7 @@ export default function App({ username, onSignedOut }: AppProps): React.JSX.Elem
             )}
             <span className="spacer" />
             {notice && <span className="notice">{notice}</span>}
-            {info && <span className="muted">Shellport {info.version}</span>}
+            {info && <span className="muted">SimSSH {info.version}</span>}
           </footer>
         </main>
       </div>

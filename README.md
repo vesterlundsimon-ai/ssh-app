@@ -1,6 +1,6 @@
-# Shellport
+# SimSSH
 
-A tabbed SSH and SFTP client for Windows, in the spirit of MobaXterm.
+A tabbed SSH and SFTP client for Windows, in the spirit of MobaXterm. (Called Shellport before version 0.4.)
 
 ## What it does
 
@@ -17,15 +17,17 @@ Security design, controls and known limitations are in [SECURITY.md](SECURITY.md
 
 ## Install
 
-Download `Shellport-Setup-x.y.z.exe` from the [Releases page](../../releases) (or from the latest **Build** run under Actions → Artifacts) and run it.
+Download `SimSSH-Setup-x.y.z.exe` from the [Releases page](../../releases) (or from the latest **Build** run under Actions → Artifacts) and run it.
 
 The installer isn't code-signed, so Windows SmartScreen will say "Windows protected your PC". Click **More info → Run anyway**.
 
-The first time you start it, create an account. If you used Shellport 0.1 or 0.2, your existing sessions move into that first account.
+Installing SimSSH over Shellport upgrades it in place, and your accounts move to the new data folder automatically on first start.
+
+The first time you start it, create an account. If you used SimSSH 0.1 or 0.2, your existing sessions move into that first account.
 
 **There's no password reset.** Without your password, nobody (including you) can decrypt that account, so keep it in a password manager.
 
-Accounts are stored in `%APPDATA%\Shellport\accounts\`, one encrypted file per account. They're local to this PC; nothing is uploaded.
+Accounts are stored in `%APPDATA%\SimSSH\accounts\`, one encrypted file per account. They're local to this PC; nothing is uploaded.
 
 ## Develop
 

@@ -77,7 +77,7 @@ export function SignIn({ status, onSignedIn }: Props): React.JSX.Element {
             <path d="M10 15h7" />
           </svg>
         </div>
-        <h1>{creating ? (status.hasAccounts ? 'Create an account' : 'Create your account') : 'Sign in to Shellport'}</h1>
+        <h1>{creating ? (status.hasAccounts ? 'Create an account' : 'Create your account') : 'Sign in to SimSSH'}</h1>
         {creating && (
           <p className="signin-lead">
             Your sessions, saved passwords and trusted host keys are encrypted with this password.

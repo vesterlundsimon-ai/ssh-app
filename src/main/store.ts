@@ -37,7 +37,7 @@ async function readJsonIfExists(file: string): Promise<unknown> {
   }
 }
 
-/** Data saved by Shellport 0.1–0.2, or null if there is none. */
+/** Data saved by versions 0.1–0.2 (then called Shellport), or null if there is none. */
 async function readLegacy(): Promise<VaultData | null> {
   const files = legacyFiles()
   const [sessionsRaw, secretsRaw, hostsRaw] = await Promise.all([

@@ -2,12 +2,13 @@ import { app, BrowserWindow, dialog, Menu, protocol, session, shell } from 'elec
 import { promises as fs } from 'fs'
 import * as path from 'path'
 import { activeConnectionCount, closeAllConnections, registerIpc, setMainWindow } from './ipc'
+import { migrateFromShellport } from './migrateName'
 
-app.setAppUserModelId('com.shellport.app')
+app.setAppUserModelId('com.simssh.app')
 
 // The UI is served from a private app:// scheme instead of file://, so the page gets
 // no file-system privileges (see the grantFileProtocolExtraPrivileges fuse).
-export const APP_ORIGIN = 'app://shellport'
+export const APP_ORIGIN = 'app://simssh'
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }
 ])
@@ -42,7 +43,7 @@ function registerAppProtocol(): void {
     const url = new URL(req.url)
     const rel = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname)
     const file = path.resolve(root, '.' + rel)
-    if (url.host !== 'shellport' || (file !== root && !file.startsWith(root + path.sep))) {
+    if (url.host !== 'simssh' || (file !== root && !file.startsWith(root + path.sep))) {
       return new Response('Not found', { status: 404 })
     }
     try {
@@ -102,7 +103,7 @@ function createWindow(): void {
     minHeight: 480,
     show: false,
     backgroundColor: '#0f1115',
-    title: 'Shellport',
+    title: 'SimSSH',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -127,7 +128,7 @@ function createWindow(): void {
     const n = activeConnectionCount()
     const res = await dialog.showMessageBox(mainWindow!, {
       type: 'question',
-      message: `Close Shellport?`,
+      message: `Close SimSSH?`,
       detail: `${n} connection${n === 1 ? ' is' : 's are'} still open and will be disconnected.`,
       buttons: ['Cancel', 'Close'],
       defaultId: 1,
@@ -182,6 +183,7 @@ app.whenReady().then(async () => {
   )
   hardenSession()
   registerAppProtocol()
+  await migrateFromShellport()
   registerIpc()
   createWindow()
 })

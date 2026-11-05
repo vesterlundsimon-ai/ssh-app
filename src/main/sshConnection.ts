@@ -382,7 +382,7 @@ export class SshConnection {
     }
     const res = await this.hooks.prompt({
       title: `${this.opts.username}@${this.opts.host} asks`,
-      // The text comes from the server: label it so it can't pose as Shellport itself.
+      // The text comes from the server: label it so it can't pose as SimSSH itself.
       message: `Message from the server:\n${instructions || '(none)'}`,
       fields: prompts.map((p) => ({ label: p.prompt.trim(), secret: !p.echo }))
     })

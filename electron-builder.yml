@@ -1,5 +1,5 @@
-appId: com.shellport.app
-productName: Shellport
+appId: com.simssh.app
+productName: SimSSH
 copyright: Copyright © 2026 Simon Vesterlund
 directories:
   buildResources: build
@@ -17,15 +17,18 @@ win:
     - target: nsis
       arch: [x64]
   icon: build/icon.ico
-  artifactName: Shellport-Setup-${version}.${ext}
+  artifactName: SimSSH-Setup-${version}.${ext}
 nsis:
+  # Same id as the installer used when the app was called Shellport, so installing
+  # SimSSH upgrades it in place instead of leaving two apps installed.
+  guid: 557c8bc8-40f6-5c9d-a7a5-85c58f6ec6cf
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Shellport
-  uninstallDisplayName: Shellport
+  shortcutName: SimSSH
+  uninstallDisplayName: SimSSH
   deleteAppDataOnUninstall: false
 # Electron fuses: switch off Node.js debugging/injection features the app never uses,
 # and make Windows refuse to run a tampered app.asar.
