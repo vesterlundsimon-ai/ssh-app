@@ -51,6 +51,9 @@ jobs:
       - uses: ./.github/actions/ssh-test-server
       - run: npm run test:unit
       - run: npm run test:backend
+      - name: Show the post-quantum test server's log
+        if: failure()
+        run: sudo cat /tmp/sshd-pq.log || true
 
   installer:
     name: Windows installer

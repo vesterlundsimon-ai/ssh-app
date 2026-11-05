@@ -39,7 +39,7 @@ runs:
         # Pin the exact commit behind the V_10_6_P1 tag.
         test "$(git -C "$src" rev-parse HEAD)" = a8c72b842423f0774f542d3c2197247c3dd28d74
         (cd "$src" && autoreconf && ./configure -q --without-pam > /dev/null && make -s -j"$(nproc)" sshd sshd-session sshd-auth > /dev/null)
-        printf 'Port 2225\nListenAddress 127.0.0.1\nHostKey /etc/ssh/ssh_host_ed25519_key\nKexAlgorithms mlkem768x25519-sha256\nPasswordAuthentication yes\nSubsystem sftp internal-sftp\nSshdSessionPath %s/sshd-session\nSshdAuthPath %s/sshd-auth\nPidFile /tmp/sshd-pq.pid\n' "$src" "$src" > "$RUNNER_TEMP/sshd_pq_config"
+        printf 'Port 2225\nListenAddress 127.0.0.1\nHostKey /etc/ssh/ssh_host_ed25519_key\nKexAlgorithms mlkem768x25519-sha256\nPasswordAuthentication yes\nSubsystem sftp internal-sftp\nSshdSessionPath %s/sshd-session\nSshdAuthPath %s/sshd-auth\nPidFile /tmp/sshd-pq.pid\nLogLevel DEBUG1\n' "$src" "$src" > "$RUNNER_TEMP/sshd_pq_config"
         sudo mkdir -p /var/empty
-        sudo "$src/sshd" -f "$RUNNER_TEMP/sshd_pq_config"
+        sudo "$src/sshd" -f "$RUNNER_TEMP/sshd_pq_config" -E /tmp/sshd-pq.log
         echo "TEST_PQ_PORT=2225" >> "$GITHUB_ENV"
