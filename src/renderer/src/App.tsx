@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AppInfo, AuthMethod, ConnState, Folder, PromptRequest, Session, SessionStoreData } from '../../shared/types'
+import type { UpdateStatus, AppInfo, AuthMethod, ConnState, Folder, PromptRequest, Session, SessionStoreData } from '../../shared/types'
 import { TerminalView } from './components/TerminalView'
 import { SessionTree } from './components/SessionTree'
 import { SessionEditor } from './components/SessionEditor'
@@ -65,6 +65,7 @@ export default function App({ username, onSignedOut }: AppProps): React.JSX.Elem
   const [quickError, setQuickError] = useState('')
   const [notice, setNotice] = useState('')
   const [accountDialog, setAccountDialog] = useState<'password' | 'delete' | null>(null)
+  const [update, setUpdate] = useState<UpdateStatus | null>(null)
 
   // Refs so long-lived listeners always see current state.
   const tabsRef = useRef(tabs)
@@ -85,8 +86,10 @@ export default function App({ username, onSignedOut }: AppProps): React.JSX.Elem
   useEffect(() => {
     void reloadStore()
     void window.api.appInfo().then(setInfo)
+    void window.api.update.status().then(setUpdate)
     const offs = [
       window.api.store.onChanged(() => void reloadStore()),
+      window.api.update.onStatus(setUpdate),
       window.api.ssh.onData((id, d) => writeToTerminal(id, d)),
       window.api.ssh.onStatus(({ connId, state, message }) => {
         setTabs((ts) => ts.map((t) => (t.id === connId ? { ...t, status: state, message } : t)))
@@ -322,6 +325,19 @@ export default function App({ username, onSignedOut }: AppProps): React.JSX.Elem
     onSignedOut()
   }
 
+  const checkForUpdates = async (): Promise<void> => {
+    const s = await window.api.update.check()
+    setUpdate(s)
+    if (s.message && s.state !== 'error') showNotice(s.message)
+    else if (s.state === 'idle') showNotice(`SimSSH ${s.currentVersion} is the latest version.`)
+  }
+
+  const installUpdate = async (): Promise<void> => {
+    const open = tabsRef.current.filter((t) => t.status === 'connected' || t.status === 'connecting').length
+    if (open && !window.confirm(`Restart SimSSH to update? ${open} open connection${open === 1 ? '' : 's'} will close.`)) return
+    await window.api.update.install()
+  }
+
   const accountMenu = (e: React.MouseEvent<HTMLButtonElement>): void => {
     const r = e.currentTarget.getBoundingClientRect()
     setMenu({
@@ -329,6 +345,7 @@ export default function App({ username, onSignedOut }: AppProps): React.JSX.Elem
       y: r.bottom + 4,
       items: [
         { label: 'Change password…', onClick: () => setAccountDialog('password') },
+        { label: 'Check for updates', onClick: () => void checkForUpdates() },
         { label: 'Sign out', onClick: () => void signOut() },
         'separator',
         { label: 'Delete account…', danger: true, onClick: () => setAccountDialog('delete') }
@@ -437,6 +454,26 @@ export default function App({ username, onSignedOut }: AppProps): React.JSX.Elem
           {multiExec ? `Multi-exec on (${multiCount})` : 'Multi-exec'}
         </button>
         <span className="spacer" />
+        {update?.state === 'available' && (
+          <button className="btn update-btn" onClick={() => void window.api.update.download()} title={`You have ${update.currentVersion}`}>
+            Update to {update.version}
+          </button>
+        )}
+        {update?.state === 'downloading' && (
+          <span className="update-progress" role="status">
+            Downloading {update.version}… {update.percent ?? 0}%
+          </span>
+        )}
+        {update?.state === 'ready' && (
+          <button className="btn btn-primary" onClick={() => void installUpdate()}>
+            Restart to update
+          </button>
+        )}
+        {update?.state === 'error' && (
+          <button className="btn update-btn" onClick={() => void window.api.update.download()} title={update.message}>
+            Update failed. Retry
+          </button>
+        )}
         <button className="account-btn" onClick={accountMenu} aria-haspopup="menu" title="Account">
           <span className="avatar" aria-hidden>
             {username.slice(0, 1).toUpperCase()}

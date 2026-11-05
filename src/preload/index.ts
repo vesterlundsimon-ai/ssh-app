@@ -4,6 +4,7 @@ import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'ele
 import type {
   AppInfo,
   AuthStatus,
+  UpdateStatus,
   ConnectRequest,
   ConnStatusEvent,
   Folder,
@@ -23,6 +24,14 @@ function on<T extends unknown[]>(channel: string, fn: (...args: T) => void): () 
 
 const api = {
   appInfo: (): Promise<AppInfo> => ipcRenderer.invoke('app:info'),
+
+  update: {
+    status: (): Promise<UpdateStatus> => ipcRenderer.invoke('update:status'),
+    check: (): Promise<UpdateStatus> => ipcRenderer.invoke('update:check'),
+    download: (): Promise<void> => ipcRenderer.invoke('update:download'),
+    install: (): Promise<void> => ipcRenderer.invoke('update:install'),
+    onStatus: (fn: (s: UpdateStatus) => void) => on('update:status', fn)
+  },
 
   auth: {
     status: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:status'),

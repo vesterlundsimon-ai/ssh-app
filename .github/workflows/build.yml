@@ -84,6 +84,8 @@ jobs:
           name: SimSSH-installer
           path: |
             dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
             dist/SHA256SUMS.txt
           if-no-files-found: error
 
@@ -101,7 +103,10 @@ jobs:
           path: dist
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
+          # latest.yml and the .blockmap are what the in-app updater reads.
           files: |
             dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
             dist/SHA256SUMS.txt
           generate_release_notes: true

@@ -845,6 +845,23 @@ textarea {
   transform: rotate(225deg) translate(2px, 2px);
 }
 
+/* ---------- updates ---------- */
+
+.update-btn {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.update-btn:hover {
+  background: rgba(108, 195, 213, 0.22);
+}
+.update-progress {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* ---------- account ---------- */
 
 .account-btn {

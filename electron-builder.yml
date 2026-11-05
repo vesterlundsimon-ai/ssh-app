@@ -12,6 +12,13 @@ files:
 # so no C++ toolchain is needed to build the installer.
 npmRebuild: false
 asar: true
+# Where in-app updates come from. Builds never publish by themselves (--publish never);
+# this only writes app-update.yml into the app and latest.yml next to the installer.
+publish:
+  provider: github
+  owner: vesterlundsimon-ai
+  repo: ssh-app
+  releaseType: release
 win:
   target:
     - target: nsis

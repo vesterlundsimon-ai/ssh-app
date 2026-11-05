@@ -119,3 +119,12 @@ export interface AuthStatus {
   /** Sessions saved by an older version that the first new account will take over. */
   legacySessions: number
 }
+
+export interface UpdateStatus {
+  state: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'
+  currentVersion: string
+  /** Version of the available / downloaded update. */
+  version?: string
+  percent?: number
+  message?: string
+}

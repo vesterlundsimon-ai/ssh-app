@@ -63,6 +63,13 @@ SimSSH handles SSH credentials and connects to servers that may be compromised o
 - **Upgrading from 0.1/0.2:** the first account created takes over the old `sessions.json`, DPAPI-encrypted `secrets.json` and `known_hosts.json`. The old files are deleted only after the new vault has been written and decrypted successfully.
 - Files are written atomically (temp file + rename) and serialised, so a crash can't leave a half-written vault.
 
+### Updates
+
+- Updates come only from this repository's GitHub Releases over HTTPS (`electron-updater`, GitHub provider). Nothing downloads until you click **Update**; pre-releases and older versions are never offered.
+- The downloaded installer must match the SHA-512 in the release's `latest.yml`, or it isn't installed.
+- The updater uses its own network session, separate from the UI's (which can't reach the network at all).
+- Limitation: because the installer isn't code-signed, the update is only as trustworthy as the GitHub account that publishes releases. Signing would let the updater also verify the publisher.
+
 ### Build and supply chain
 
 - GitHub Actions use read-only permissions by default; only the release job can write.

@@ -15,6 +15,8 @@ import { knownKeyTypes, verifyHostKey } from './knownHosts'
 import { SshConnection, type PromptAnswer } from './sshConnection'
 import * as sftpOps from './sftpOps'
 import * as v from './validate'
+import * as updater from './updater'
+import type { UpdateStatus } from '../shared/types'
 import type { AppInfo, AuthStatus, ConnStatusEvent, PromptRequest, TransferDirection, TransferProgress } from '../shared/types'
 
 const MAX_CONNECTIONS = 100
@@ -144,6 +146,17 @@ export function registerIpc(): void {
     }),
     { public: true }
   )
+
+  // ---- updates ----------------------------------------------------------------
+  updater.startUpdater((s) => send('update:status', s))
+  handle('update:status', (): UpdateStatus => updater.getUpdateStatus(), { public: true })
+  handle('update:check', () => updater.check())
+  handle('update:download', () => updater.download())
+  handle('update:install', () => {
+    // The user already confirmed in the UI; close connections so the window can quit.
+    closeAllConnections()
+    updater.install()
+  })
 
   // ---- accounts ---------------------------------------------------------------
   handle(

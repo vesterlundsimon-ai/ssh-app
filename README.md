@@ -11,6 +11,7 @@ A tabbed SSH and SFTP client for Windows, in the spirit of MobaXterm. (Called Sh
 - **Host key checking**: first connection shows the fingerprint; a changed key shows a man-in-the-middle warning and refuses unless you replace it.
 - **SFTP file browser** for the active tab: drag files or folders in from Explorer to upload, double-click to download, rename, new folder, recursive delete, sortable columns, transfer progress.
 - **Multi-exec**: type once, run on every ticked tab. Broadcasting tabs and the banner turn orange so you always know.
+- **In-app updates**: when a new release is published, an **Update** button appears next to your account name. It downloads only what changed, then **Restart to update** installs it. Your accounts and settings stay. You can also choose **Check for updates** in the account menu.
 - Copy on select, right-click paste, Ctrl+Shift+C/V, clickable links, Enter to reconnect a dropped tab.
 
 Security design, controls and known limitations are in [SECURITY.md](SECURITY.md).
@@ -53,6 +54,9 @@ npm run test:backend
 ```
 
 ### Releasing
+
+The in-app updater reads `latest.yml` and the `.blockmap` from the newest GitHub release, which the **Build** workflow attaches automatically. Bump `version` in `package.json` before releasing; the updater only offers versions newer than the one installed.
+
 
 Push a tag like `v0.2.0` (after bumping `version` in `package.json`). The **Build** workflow builds the installer on Windows and attaches it to a GitHub release.
 
