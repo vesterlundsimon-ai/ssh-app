@@ -125,18 +125,12 @@ async function chooseDir(title: string): Promise<string | null> {
 
 // ---- handlers -----------------------------------------------------------------------
 
-function updateTitle(): void {
-  const name = store.username()
-  getWin()?.setTitle(name ? `SimSSH · ${name}` : 'SimSSH')
-}
-
 /** Sign out: drop every connection, forget per-session permissions, wipe the key. */
 function signOut(): void {
   closeAllConnections()
   chosenDownloadDirs.clear()
   downloadedPaths.clear()
   store.lock()
-  updateTitle()
 }
 
 export function registerIpc(): void {
@@ -167,7 +161,6 @@ export function registerIpc(): void {
     async (username, password) => {
       signOut()
       await store.create(username, password)
-      updateTitle()
     },
     { public: true }
   )
@@ -176,7 +169,6 @@ export function registerIpc(): void {
     async (username, password) => {
       signOut()
       await store.signIn(username, password)
-      updateTitle()
     },
     { public: true }
   )
